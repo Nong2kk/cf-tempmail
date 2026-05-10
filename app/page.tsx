@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Copy, Plus } from "lucide-react";
 
 export default function HomePage() {
@@ -33,12 +33,13 @@ export default function HomePage() {
 
     alert("Copied!");
   }
-useState(() => {
+useEffect(() => {
   const saved = localStorage.getItem("temp-emails");
 
   if (saved) {
     setEmails(JSON.parse(saved));
   }
+}, []);
 });
   return (
     <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
