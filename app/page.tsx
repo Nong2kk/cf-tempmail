@@ -29,7 +29,9 @@ function EmailFrame({ html }: { html: string }) {
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) return;
 
-    const content = `<!DOCTYPE html>
+    // Nếu là full HTML document thì dùng thẳng, không wrap thêm
+    const isFullDoc = /^\s*(<(!DOCTYPE|html))/i.test(html);
+    const content = isFullDoc ? html : `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -37,18 +39,14 @@ function EmailFrame({ html }: { html: string }) {
 <style>
   * { box-sizing: border-box; }
   body {
-    margin: 0;
-    padding: 16px;
+    margin: 0; padding: 16px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-    font-size: 14px;
-    line-height: 1.6;
-    color: #1a1a1a;
-    background: #fff;
+    font-size: 14px; line-height: 1.6; color: #1a1a1a; background: #fff;
     word-break: break-word;
   }
   img { max-width: 100%; height: auto; }
   a { color: #2563eb; }
-  table { max-width: 100% !important; width: 100% !important; }
+  table { max-width: 100% !important; }
   pre, code { white-space: pre-wrap; word-break: break-all; }
 </style>
 </head>
@@ -80,7 +78,8 @@ function EmailFrame({ html }: { html: string }) {
 }
 
 function isHtmlContent(body: string): boolean {
-  return /<[a-z][\s\S]*>/i.test(body);
+  const trimmed = body.trimStart();
+  return trimmed.startsWith("<html") || trimmed.startsWith("<!DOCTYPE") || /<(div|table|td|p|span|img|a|body|head|style)[\s\S]/i.test(body);
 }
 
 export default function HomePage() {
