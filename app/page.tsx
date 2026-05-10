@@ -19,59 +19,38 @@ type EmailMessage = {
 };
 
 function EmailFrame({ html }: { html: string }) {
+  const [blobUrl, setBlobUrl] = useState<string>("");
+  const [height, setHeight] = useState(500);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(400);
 
   useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-
-    // Nếu là full HTML document thì dùng thẳng, không wrap thêm
+    // Wrap nếu chưa phải full HTML doc
     const isFullDoc = /^\s*(<(!DOCTYPE|html))/i.test(html);
-    const content = isFullDoc ? html : `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 16px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-    font-size: 14px; line-height: 1.6; color: #1a1a1a; background: #fff;
-    word-break: break-word;
-  }
-  img { max-width: 100%; height: auto; }
-  a { color: #2563eb; }
-  table { max-width: 100% !important; }
-  pre, code { white-space: pre-wrap; word-break: break-all; }
-</style>
-</head>
-<body>${html}</body>
-</html>`;
+    const content = isFullDoc ? html : `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a;word-break:break-word;}img{max-width:100%;height:auto;}table{max-width:100%!important;}</style></head><body>${html}</body></html>`;
 
-    doc.open();
-    doc.write(content);
-    doc.close();
+    // Dùng Blob URL thay vì doc.write — tránh bị chặn bởi CSP
+    const blob = new Blob([content], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    setBlobUrl(url);
 
-    const adjust = () => {
-      const body = doc.body;
-      if (body) setHeight(body.scrollHeight + 32);
-    };
-
-    iframe.onload = adjust;
-    setTimeout(adjust, 300);
-    setTimeout(adjust, 1000); // fallback nếu có ảnh load chậm
+    return () => URL.revokeObjectURL(url);
   }, [html]);
+
+  const handleLoad = () => {
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      if (doc?.body) setHeight(doc.body.scrollHeight + 40);
+    } catch {}
+  };
+
+  if (!blobUrl) return <div className="p-4 text-sm text-slate-400">Đang tải...</div>;
 
   return (
     <iframe
       ref={iframeRef}
+      src={blobUrl}
+      onLoad={handleLoad}
       style={{ width: "100%", height, border: "none" }}
-      sandbox="allow-same-origin allow-popups"
       title="email-content"
     />
   );
