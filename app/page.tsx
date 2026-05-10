@@ -1,8 +1,12 @@
 "use client";
 
+import { createClient } from "@supabase/supabase-js";
 import { useState, useEffect } from "react";
 import { Copy, Plus } from "lucide-react";
-
+const supabase = createClient(
+  "https://afhbwspoayjxpzlipvsm.supabase.co",
+  "sb_publishable_Xo5jzpoC9rllxUAfDSAsOg_CafVKRpC"
+);
 export default function HomePage() {
   const [email, setEmail] = useState("");
   const [emails, setEmails] = useState<string[]>([]);
@@ -19,7 +23,11 @@ export default function HomePage() {
   const updated = [data.email, ...emails];
 
   setEmails(updated);
-
+await supabase.from("emails").insert({
+  email: data.email,
+  subject: "Inbox Ready",
+  body: "Mail created successfully",
+});
   localStorage.setItem(
     "temp-emails",
     JSON.stringify(updated)
