@@ -40,7 +40,6 @@ useEffect(() => {
     setEmails(JSON.parse(saved));
   }
 }, []);
-});
   return (
     <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
       <div className="w-full max-w-xl rounded-3xl bg-white p-8 shadow">
