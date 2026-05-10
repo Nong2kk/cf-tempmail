@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@supabase/supabase-js";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Copy, Plus, Inbox, ArrowLeft, Mail, RefreshCw } from "lucide-react";
 
 const supabase = createClient(
@@ -14,8 +14,74 @@ type EmailMessage = {
   email: string;
   subject: string;
   body: string;
+  from_email?: string;
   created_at: string;
 };
+
+function EmailFrame({ html }: { html: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(400);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+
+    const content = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fff;
+    word-break: break-word;
+  }
+  img { max-width: 100%; height: auto; }
+  a { color: #2563eb; }
+  table { max-width: 100% !important; width: 100% !important; }
+  pre, code { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>${html}</body>
+</html>`;
+
+    doc.open();
+    doc.write(content);
+    doc.close();
+
+    const adjust = () => {
+      const body = doc.body;
+      if (body) setHeight(body.scrollHeight + 32);
+    };
+
+    iframe.onload = adjust;
+    setTimeout(adjust, 300);
+    setTimeout(adjust, 1000); // fallback nếu có ảnh load chậm
+  }, [html]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      style={{ width: "100%", height, border: "none" }}
+      sandbox="allow-same-origin allow-popups"
+      title="email-content"
+    />
+  );
+}
+
+function isHtmlContent(body: string): boolean {
+  return /<[a-z][\s\S]*>/i.test(body);
+}
 
 export default function HomePage() {
   const [email, setEmail] = useState("");
@@ -28,11 +94,14 @@ export default function HomePage() {
   async function generateEmail() {
     const res = await fetch("/api/create", { method: "POST" });
     const data = await res.json();
-
     setEmail(data.email);
     const updated = [data.email, ...emails];
     setEmails(updated);
-
+    await supabase.from("emails").insert({
+      email: data.email,
+      subject: "Inbox Ready",
+      body: "Mail created successfully",
+    });
     localStorage.setItem("temp-emails", JSON.stringify(updated));
   }
 
@@ -57,9 +126,7 @@ export default function HomePage() {
       .eq("email", addr)
       .order("created_at", { ascending: false });
 
-    if (!error && data) {
-      setMessages(data as EmailMessage[]);
-    }
+    if (!error && data) setMessages(data as EmailMessage[]);
     setLoadingInbox(false);
   }
 
@@ -68,44 +135,54 @@ export default function HomePage() {
     if (saved) setEmails(JSON.parse(saved));
   }, []);
 
-  // ── Inbox view ─────────────────────────────────────────────
-  if (selectedEmail) {
-    // Message detail
-    if (selectedMessage) {
-      return (
-        <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
-          <div className="w-full max-w-xl rounded-3xl bg-white p-8 shadow">
-            <button
-              onClick={() => setSelectedMessage(null)}
-              className="mb-4 flex items-center gap-2 text-slate-500 hover:text-slate-800 text-sm"
-            >
-              <ArrowLeft size={16} /> Quay lại inbox
-            </button>
+  // ── Chi tiết thư ────────────────────────────────────────────
+  if (selectedEmail && selectedMessage) {
+    const isHtml = isHtmlContent(selectedMessage.body);
 
-            <div className="mb-4 border-b pb-4">
-              <h2 className="text-xl font-bold text-slate-800">
-                {selectedMessage.subject}
+    return (
+      <main className="min-h-screen bg-slate-100 p-4 md:p-6">
+        <div className="mx-auto max-w-3xl">
+          <button
+            onClick={() => setSelectedMessage(null)}
+            className="mb-4 flex items-center gap-2 text-slate-500 hover:text-slate-800 text-sm"
+          >
+            <ArrowLeft size={16} /> Quay lại inbox
+          </button>
+
+          <div className="rounded-2xl bg-white shadow overflow-hidden">
+            <div className="px-6 py-5 border-b">
+              <h2 className="text-xl font-semibold text-slate-900">
+                {selectedMessage.subject || "(No subject)"}
               </h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Đến: {selectedMessage.email}
-              </p>
-              <p className="text-xs text-slate-400">
-                {new Date(selectedMessage.created_at).toLocaleString("vi-VN")}
-              </p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
+                {selectedMessage.from_email && (
+                  <span>Từ: <span className="text-slate-700">{selectedMessage.from_email}</span></span>
+                )}
+                <span>Đến: <span className="text-slate-700">{selectedMessage.email}</span></span>
+                <span>{new Date(selectedMessage.created_at).toLocaleString("vi-VN")}</span>
+              </div>
             </div>
 
-            <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-              {selectedMessage.body}
+            <div className="px-2 py-2">
+              {isHtml ? (
+                <EmailFrame html={selectedMessage.body} />
+              ) : (
+                <div className="px-4 py-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                  {selectedMessage.body || "(Không có nội dung)"}
+                </div>
+              )}
             </div>
           </div>
-        </main>
-      );
-    }
+        </div>
+      </main>
+    );
+  }
 
-    // Inbox list
+  // ── Inbox list ──────────────────────────────────────────────
+  if (selectedEmail) {
     return (
-      <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
-        <div className="w-full max-w-xl rounded-3xl bg-white p-8 shadow">
+      <main className="min-h-screen bg-slate-100 p-4 md:p-6">
+        <div className="mx-auto max-w-3xl">
           <button
             onClick={() => setSelectedEmail(null)}
             className="mb-4 flex items-center gap-2 text-slate-500 hover:text-slate-800 text-sm"
@@ -113,53 +190,61 @@ export default function HomePage() {
             <ArrowLeft size={16} /> Quay lại danh sách
           </button>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <Inbox size={20} /> Inbox
-              </h2>
-              <p className="mt-1 text-sm text-slate-400 truncate max-w-xs">
-                {selectedEmail}
-              </p>
+          <div className="rounded-2xl bg-white shadow overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                  <Inbox size={18} /> Inbox
+                </h2>
+                <p className="text-sm text-slate-400 truncate max-w-xs mt-0.5">{selectedEmail}</p>
+              </div>
+              <button
+                onClick={() => fetchInbox(selectedEmail)}
+                className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                <RefreshCw size={14} /> Làm mới
+              </button>
             </div>
-            <button
-              onClick={() => fetchInbox(selectedEmail)}
-              className="flex items-center gap-1 rounded-xl border px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-            >
-              <RefreshCw size={14} /> Làm mới
-            </button>
-          </div>
 
-          <div className="mt-6 space-y-2">
             {loadingInbox ? (
-              <p className="text-sm text-slate-400 text-center py-8">Đang tải...</p>
+              <div className="py-16 text-center text-sm text-slate-400">Đang tải...</div>
             ) : messages.length === 0 ? (
-              <div className="text-center py-12">
-                <Mail size={36} className="mx-auto text-slate-300 mb-3" />
+              <div className="py-16 text-center">
+                <Mail size={40} className="mx-auto text-slate-200 mb-3" />
                 <p className="text-slate-400 text-sm">Chưa có thư nào</p>
               </div>
             ) : (
-              messages.map((msg) => (
-                <button
-                  key={msg.id}
-                  onClick={() => setSelectedMessage(msg)}
-                  className="w-full text-left rounded-xl border px-4 py-3 hover:bg-slate-50 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm text-slate-800 truncate">
-                        {msg.subject}
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5 truncate">
-                        {msg.body}
-                      </p>
+              <div className="divide-y">
+                {messages.map((msg) => (
+                  <button
+                    key={msg.id}
+                    onClick={() => setSelectedMessage(msg)}
+                    className="w-full text-left px-6 py-4 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800 truncate">
+                          {msg.from_email || "Unknown sender"}
+                        </p>
+                        <p className="text-sm text-slate-600 truncate mt-0.5">
+                          {msg.subject || "(No subject)"}
+                        </p>
+                        <p className="text-xs text-slate-400 truncate mt-0.5">
+                          {isHtmlContent(msg.body)
+                            ? msg.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 80)
+                            : msg.body.slice(0, 80)}
+                        </p>
+                      </div>
+                      <span className="text-xs text-slate-400 whitespace-nowrap shrink-0 mt-0.5">
+                        {new Date(msg.created_at).toLocaleTimeString("vi-VN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-400 whitespace-nowrap shrink-0">
-                      {new Date(msg.created_at).toLocaleDateString("vi-VN")}
-                    </span>
-                  </div>
-                </button>
-              ))
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -167,7 +252,7 @@ export default function HomePage() {
     );
   }
 
-  // ── Main view ───────────────────────────────────────────────
+  // ── Main ────────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
       <div className="w-full max-w-xl rounded-3xl bg-white p-8 shadow">
@@ -179,47 +264,43 @@ export default function HomePage() {
             value={email}
             readOnly
             placeholder="Click generate..."
-            className="flex-1 rounded-xl border px-4 py-3"
+            className="flex-1 rounded-xl border px-4 py-3 text-sm"
           />
-          <button
-            onClick={() => copyEmail()}
-            className="rounded-xl bg-slate-900 px-4 text-white"
-          >
+          <button onClick={() => copyEmail()} className="rounded-xl bg-slate-900 px-4 text-white">
             <Copy size={18} />
           </button>
         </div>
 
         <button
           onClick={generateEmail}
-          className="mt-4 flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-white"
+          className="mt-4 flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-white text-sm font-medium"
         >
-          <Plus size={18} />
-          Generate Email
+          <Plus size={18} /> Generate Email
         </button>
 
-        <div className="mt-6 space-y-2">
-          {emails.map((item) => (
-            <div
-              key={item}
-              className="flex items-center justify-between rounded-xl border px-4 py-3"
-            >
-              <span className="text-sm truncate mr-2">{item}</span>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => openInbox(item)}
-                  className="flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900 border rounded-lg px-2 py-1"
-                >
-                  <Inbox size={14} /> Inbox
-                </button>
-                <button
-                  onClick={() => copyEmail(item)}
-                  className="text-sm text-blue-600"
-                >
-                  Copy
-                </button>
+        <div className="mt-6 divide-y rounded-2xl border overflow-hidden">
+          {emails.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-slate-400">
+              Chưa có email nào. Nhấn Generate để tạo.
+            </p>
+          ) : (
+            emails.map((item) => (
+              <div key={item} className="flex items-center justify-between px-4 py-3 bg-white hover:bg-slate-50">
+                <span className="text-sm truncate mr-2 text-slate-700">{item}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => openInbox(item)}
+                    className="flex items-center gap-1 text-xs border rounded-lg px-2.5 py-1.5 text-slate-600 hover:bg-slate-100"
+                  >
+                    <Inbox size={13} /> Inbox
+                  </button>
+                  <button onClick={() => copyEmail(item)} className="text-xs text-blue-600 hover:underline">
+                    Copy
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </main>
