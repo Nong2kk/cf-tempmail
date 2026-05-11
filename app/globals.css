@@ -1,54 +1,27 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@source "../components";
+@source "../lib";
+
+@theme {
+  --color-honey-300: #FCD34D;
+  --color-honey-400: #FACC15;
+  --color-honey-500: #F59E0B;
+  --color-honey-600: #D97706;
+  --color-navy-900: #0F172A;
+  --color-navy-800: #111827;
+  --color-navy-700: #1E293B;
+}
 
 @layer base {
-  * {
-    box-sizing: border-box;
-  }
-
-  html {
-    scroll-behavior: smooth;
-  }
-
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     background-color: #0F172A;
     color: #f1f5f9;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-
-  /* Thin scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #1e293b;
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
-  }
-}
-
-@layer utilities {
-  /* Glass card utility */
-  .glass {
-    background: rgba(17, 24, 39, 0.8);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-  }
-
-  /* Honey glow */
-  .glow-amber {
-    box-shadow: 0 0 20px rgba(251, 191, 36, 0.15);
-  }
-
-  /* Hover for inbox rows */
-  .hover\:bg-white\/3:hover {
-    background-color: rgba(255, 255, 255, 0.03);
-  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #334155; }
 }
