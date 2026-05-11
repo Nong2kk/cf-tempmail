@@ -135,12 +135,25 @@ export default function HomePage() {
   const [loadingInbox, setLoadingInbox] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [customAlias, setCustomAlias] = useState("");
+  const [customError, setCustomError] = useState("");
 
-  async function generateEmail() {
+  async function generateEmail(alias?: string) {
     setGenerating(true);
-    const res = await fetch("/api/create", { method: "POST" });
+    setCustomError("");
+    const res = await fetch("/api/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: alias ? JSON.stringify({ alias }) : undefined,
+    });
     const data = await res.json();
+    if (!data.success) {
+      setCustomError(data.error || "Tên đã tồn tại hoặc không hợp lệ");
+      setGenerating(false);
+      return;
+    }
     setEmail(data.email);
+    setCustomAlias("");
     const updated = [data.email, ...emails];
     setEmails(updated);
     await supabase.from("emails").insert({ email: data.email, subject: "Inbox Ready", body: "Mail created successfully" });
@@ -327,34 +340,77 @@ export default function HomePage() {
         {/* Generator */}
         <div style={S.card}>
           <div style={{ padding: "20px" }}>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <div style={{ flex: 1, position: "relative" as const }}>
-                <input
-                  value={email}
-                  readOnly
-                  placeholder="Nhấn Generate để tạo..."
-                  style={{
-                    width: "100%", boxSizing: "border-box" as const,
-                    background: "#0a0a0f", border: "1px solid #1e1e2e",
-                    borderRadius: "12px", padding: "12px 16px",
-                    color: email ? "#4ade80" : "#374151",
-                    fontSize: "13px", fontFamily: "monospace",
-                    outline: "none",
-                  }}
-                />
-              </div>
-              {email && (
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <CopyButton text={email} />
+
+            {/* Custom alias input */}
+            <div style={{ marginBottom: "10px" }}>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <div style={{ flex: 1, display: "flex", alignItems: "center", background: "#0a0a0f", border: `1px solid ${customError ? "#f87171" : "#1e1e2e"}`, borderRadius: "12px", overflow: "hidden", padding: "0 12px" }}>
+                  <input
+                    value={customAlias}
+                    onChange={e => { setCustomAlias(e.target.value.replace(/[^a-z0-9._-]/gi, "").toLowerCase()); setCustomError(""); }}
+                    onKeyDown={e => e.key === "Enter" && customAlias.trim() && generateEmail(customAlias.trim())}
+                    placeholder="tênbạnmuốn"
+                    maxLength={30}
+                    style={{
+                      flex: 1, background: "none", border: "none", outline: "none",
+                      color: "#e2e8f0", fontSize: "13px", fontFamily: "monospace",
+                      padding: "12px 0",
+                    }}
+                  />
+                  <span style={{ color: "#1e1e2e", fontSize: "12px", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                    @beeaistore.site
+                  </span>
                 </div>
+                <button
+                  onClick={() => customAlias.trim() && generateEmail(customAlias.trim())}
+                  disabled={generating || !customAlias.trim()}
+                  style={{
+                    background: customAlias.trim() ? "#4ade8022" : "#111118",
+                    border: `1px solid ${customAlias.trim() ? "#4ade8044" : "#1e1e2e"}`,
+                    borderRadius: "12px", padding: "12px 16px",
+                    color: customAlias.trim() ? "#4ade80" : "#374151",
+                    fontSize: "12px", fontWeight: 700, letterSpacing: "0.04em",
+                    cursor: customAlias.trim() && !generating ? "pointer" : "not-allowed",
+                    whiteSpace: "nowrap" as const,
+                    transition: "all 0.15s",
+                  }}
+                >
+                  Tạo
+                </button>
+              </div>
+              {customError && (
+                <p style={{ color: "#f87171", fontSize: "11px", margin: "6px 0 0 4px" }}>{customError}</p>
               )}
             </div>
 
+            {/* Divider */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "12px 0" }}>
+              <div style={{ flex: 1, height: "1px", background: "#1a1a24" }} />
+              <span style={{ color: "#2a2a3a", fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em" }}>HOẶC</span>
+              <div style={{ flex: 1, height: "1px", background: "#1a1a24" }} />
+            </div>
+
+            {/* Last generated display */}
+            {email && (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+                <input
+                  value={email}
+                  readOnly
+                  style={{
+                    flex: 1, background: "#0a0a0f", border: "1px solid #1e1e2e",
+                    borderRadius: "12px", padding: "10px 14px",
+                    color: "#4ade80", fontSize: "12px", fontFamily: "monospace", outline: "none",
+                  }}
+                />
+                <CopyButton text={email} />
+              </div>
+            )}
+
             <button
-              onClick={generateEmail}
+              onClick={() => generateEmail()}
               disabled={generating}
               style={{
-                marginTop: "12px", width: "100%",
+                width: "100%",
                 background: generating ? "#1a1a24" : "linear-gradient(135deg, #4ade80, #22d3ee)",
                 border: "none", borderRadius: "12px",
                 padding: "13px", cursor: generating ? "not-allowed" : "pointer",
@@ -370,7 +426,7 @@ export default function HomePage() {
                   Đang tạo...
                 </>
               ) : (
-                <><Plus size={15} /> Generate Email</>
+                <><Plus size={15} /> Random Email</>
               )}
             </button>
           </div>
