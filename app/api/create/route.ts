@@ -7,7 +7,6 @@ function randomEmail() {
 export async function POST() {
   try {
     const alias = randomEmail();
-
     const email = `${alias}@${process.env.DOMAIN}`;
 
     const response = await fetch(
@@ -19,13 +18,9 @@ export async function POST() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          actions: [
-            {
-              type: "forward",
-              value: [process.env.DESTINATION_EMAIL],
-            },
-          ],
+          name: alias,
           enabled: true,
+          priority: 0,
           matchers: [
             {
               type: "literal",
@@ -33,23 +28,19 @@ export async function POST() {
               value: email,
             },
           ],
-          name: alias,
-          priority: 0,
+          actions: [
+            {
+              type: "worker",                          // ← đổi từ "forward" sang "worker"
+              value: [process.env.WORKER_NAME],        // ← tên worker, ví dụ: "tempmail-inbox-worker"
+            },
+          ],
         }),
       }
     );
 
     const data = await response.json();
-
-    return NextResponse.json({
-      success: true,
-      email,
-      data,
-    });
+    return NextResponse.json({ success: true, email, data });
   } catch (error) {
-    return NextResponse.json({
-      success: false,
-      error,
-    });
+    return NextResponse.json({ success: false, error });
   }
 }
