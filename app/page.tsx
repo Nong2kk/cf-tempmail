@@ -5,514 +5,469 @@ import {
   Copy, Check, RefreshCw, Inbox, ArrowLeft,
   Shield, Zap, UserX, Mail, ChevronRight, Loader2,
 } from "lucide-react";
-import { HoneycombBackground } from "@/components/honeycomb-background";
 import { EmailFrame } from "@/components/email-frame";
 import { fetchInbox } from "@/lib/inbox-service";
-import { generateRandomAlias, validateAlias } from "@/lib/email-generator";
+import { validateAlias } from "@/lib/email-generator";
 import type { InboxMessage } from "@/types/email";
 
-// ─── Constants ────────────────────────────────────────────────
 const EMAIL_DOMAIN = process.env.NEXT_PUBLIC_EMAIL_DOMAIN ?? "beeaistore.site";
 const STORAGE_KEY = "beemail-addresses";
 
-// ─── Small reusable components ────────────────────────────────
+// ── Honeycomb SVG background ───────────────────────────────────
+function HoneycombBg() {
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", opacity: 0.06, pointerEvents: "none" }}>
+      <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="hc" x="0" y="0" width="56" height="100" patternUnits="userSpaceOnUse">
+            <polygon points="28,2 54,16 54,44 28,58 2,44 2,16" fill="none" stroke="#F59E0B" strokeWidth="1" />
+            <polygon points="56,52 82,66 82,94 56,108 30,94 30,66" fill="none" stroke="#F59E0B" strokeWidth="1" />
+            <polygon points="0,52 26,66 26,94 0,108 -26,94 -26,66" fill="none" stroke="#F59E0B" strokeWidth="1" />
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#hc)" />
+      </svg>
+    </div>
+  );
+}
+
+// ── Copy button ────────────────────────────────────────────────
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const handle = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // fallback for older browsers
+    try { await navigator.clipboard.writeText(text); }
+    catch {
       const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
+      ta.value = text; document.body.appendChild(ta);
+      ta.select(); document.execCommand("copy");
       document.body.removeChild(ta);
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <button
-      onClick={handle}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-        copied
-          ? "bg-amber-400/20 text-amber-400 border border-amber-400/40"
-          : "bg-white/5 text-slate-400 border border-white/10 hover:border-amber-400/30 hover:text-amber-400"
-      }`}
-    >
+    <button onClick={handle} style={{
+      display: "flex", alignItems: "center", gap: "6px",
+      padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: 600,
+      cursor: "pointer", border: "1px solid",
+      transition: "all 0.2s",
+      background: copied ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.05)",
+      borderColor: copied ? "rgba(251,191,36,0.4)" : "rgba(255,255,255,0.1)",
+      color: copied ? "#FACC15" : "#94a3b8",
+    }}>
       {copied ? <Check size={12} /> : <Copy size={12} />}
       {copied ? "Đã copy!" : "Sao chép"}
     </button>
   );
 }
 
-function Spinner() {
-  return <Loader2 size={16} className="animate-spin text-amber-400" />;
-}
+// ── Shared styles ──────────────────────────────────────────────
+const card: React.CSSProperties = {
+  background: "#111827", border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "20px", overflow: "hidden",
+};
+const page: React.CSSProperties = {
+  minHeight: "100vh", background: "#0F172A", color: "#f1f5f9",
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+};
+const backBtn: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: "6px",
+  color: "#64748b", fontSize: "13px", fontWeight: 600,
+  background: "none", border: "none", cursor: "pointer",
+  marginBottom: "24px", padding: 0, transition: "color 0.15s",
+};
+const divider: React.CSSProperties = {
+  height: "1px", background: "rgba(255,255,255,0.06)", margin: "16px 0",
+};
+const labelStyle: React.CSSProperties = {
+  display: "block", fontSize: "11px", fontWeight: 700,
+  color: "#475569", letterSpacing: "0.1em", textTransform: "uppercase",
+  marginBottom: "8px",
+};
 
-// ─── Main component ───────────────────────────────────────────
 type View = "home" | "inbox" | "message";
 
 export default function HomePage() {
-  // ── State ──────────────────────────────────────────────────
   const [view, setView] = useState<View>("home");
   const [addresses, setAddresses] = useState<string[]>([]);
-  const [activeEmail, setActiveEmail] = useState<string>("");
   const [customAlias, setCustomAlias] = useState("");
   const [aliasError, setAliasError] = useState("");
   const [generating, setGenerating] = useState(false);
 
+  const [activeEmail, setActiveEmail] = useState("");
   const [messages, setMessages] = useState<InboxMessage[]>([]);
   const [loadingInbox, setLoadingInbox] = useState(false);
   const [inboxError, setInboxError] = useState("");
   const [selectedMsg, setSelectedMsg] = useState<InboxMessage | null>(null);
 
-  // ── Persist addresses ──────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try { setAddresses(JSON.parse(saved)); } catch { /* ignore */ }
-    }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) setAddresses(JSON.parse(saved));
+    } catch { /* ignore */ }
   }, []);
 
-  const persistAddresses = (list: string[]) => {
-    if (typeof window !== "undefined") {
+  const persist = (list: string[]) => {
+    if (typeof window !== "undefined")
       localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    }
   };
 
-  // ── Create email ───────────────────────────────────────────
   const createEmail = useCallback(async (alias?: string) => {
     if (generating) return;
-    setGenerating(true);
-    setAliasError("");
-
+    setGenerating(true); setAliasError("");
     const res = await fetch("/api/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: alias ? JSON.stringify({ alias }) : "{}",
+      body: JSON.stringify(alias ? { alias } : {}),
     });
-
     const data = await res.json() as { success: boolean; email?: string; error?: string };
-
     if (!data.success || !data.email) {
       setAliasError(data.error ?? "Tạo email thất bại");
-      setGenerating(false);
-      return;
+      setGenerating(false); return;
     }
-
     setCustomAlias("");
-    const updated = [data.email, ...addresses.filter((a) => a !== data.email)];
-    setAddresses(updated);
-    persistAddresses(updated);
+    const updated = [data.email, ...addresses.filter(a => a !== data.email)];
+    setAddresses(updated); persist(updated);
     setGenerating(false);
   }, [generating, addresses]);
 
-  const handleRandomEmail = () => createEmail();
-  const handleCustomEmail = () => {
-    const trimmed = customAlias.trim().toLowerCase();
-    const err = validateAlias(trimmed);
-    if (err) { setAliasError(err); return; }
-    createEmail(trimmed);
-  };
-
-  // ── Open inbox ─────────────────────────────────────────────
   const openInbox = async (addr: string) => {
-    setActiveEmail(addr);
-    setSelectedMsg(null);
-    setView("inbox");
-    setLoadingInbox(true);
-    setInboxError("");
-    const result = await fetchInbox(addr);
-    if (result.success) {
-      setMessages(result.messages ?? []);
-    } else {
-      setInboxError(result.error ?? "Không tải được hộp thư");
-    }
+    setActiveEmail(addr); setSelectedMsg(null);
+    setView("inbox"); setLoadingInbox(true); setInboxError("");
+    const r = await fetchInbox(addr);
+    if (r.success) setMessages(r.messages ?? []);
+    else setInboxError(r.error ?? "Không tải được hộp thư");
     setLoadingInbox(false);
   };
 
   const refreshInbox = async () => {
     if (!activeEmail || loadingInbox) return;
-    setLoadingInbox(true);
-    setInboxError("");
-    const result = await fetchInbox(activeEmail);
-    if (result.success) {
-      setMessages(result.messages ?? []);
-    } else {
-      setInboxError(result.error ?? "Không tải được hộp thư");
-    }
+    setLoadingInbox(true); setInboxError("");
+    const r = await fetchInbox(activeEmail);
+    if (r.success) setMessages(r.messages ?? []);
+    else setInboxError(r.error ?? "Lỗi tải hộp thư");
     setLoadingInbox(false);
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // VIEW: Message detail
-  // ─────────────────────────────────────────────────────────────
-  if (view === "message" && selectedMsg) {
-    return (
-      <div className="min-h-screen bg-[#0F172A] text-white">
-        <div className="mx-auto max-w-2xl px-4 py-8">
-          <button
-            onClick={() => { setView("inbox"); setSelectedMsg(null); }}
-            className="mb-6 flex items-center gap-2 text-slate-400 hover:text-amber-400 text-sm font-semibold transition-colors"
-          >
-            <ArrowLeft size={14} /> Quay lại Inbox
-          </button>
-
-          <div className="rounded-2xl bg-[#111827] border border-white/8 overflow-hidden">
-            {/* Header */}
-            <div className="px-6 py-5 border-b border-white/8">
-              <h2 className="text-lg font-bold text-white mb-3">
-                {selectedMsg.subject}
-              </h2>
-              <div className="flex flex-wrap gap-4 text-xs">
-                <div className="flex gap-2">
-                  <span className="text-slate-600 font-semibold uppercase tracking-widest">Từ</span>
-                  <span className="text-amber-400">{selectedMsg.from}</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-slate-600 font-semibold uppercase tracking-widest">Đến</span>
-                  <span className="text-slate-400">{activeEmail}</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-slate-600 font-semibold uppercase tracking-widest">Lúc</span>
-                  <span className="text-slate-400">
-                    {selectedMsg.receivedAt.toLocaleString("vi-VN")}
-                  </span>
-                </div>
+  // ── Message detail ─────────────────────────────────────────
+  if (view === "message" && selectedMsg) return (
+    <div style={page}>
+      <div style={{ maxWidth: "680px", margin: "0 auto", padding: "32px 16px" }}>
+        <button style={backBtn} onClick={() => { setView("inbox"); setSelectedMsg(null); }}>
+          <ArrowLeft size={14} /> Quay lại Inbox
+        </button>
+        <div style={card}>
+          <div style={{ padding: "24px 28px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            <h2 style={{ color: "#f1f5f9", fontSize: "18px", fontWeight: 700, margin: "0 0 12px" }}>
+              {selectedMsg.subject}
+            </h2>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", fontSize: "12px" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <span style={{ color: "#374151", fontWeight: 700, letterSpacing: "0.08em" }}>TỪ</span>
+                <span style={{ color: "#F59E0B" }}>{selectedMsg.from}</span>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <span style={{ color: "#374151", fontWeight: 700, letterSpacing: "0.08em" }}>ĐẾN</span>
+                <span style={{ color: "#94a3b8" }}>{activeEmail}</span>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <span style={{ color: "#374151", fontWeight: 700, letterSpacing: "0.08em" }}>LÚC</span>
+                <span style={{ color: "#94a3b8" }}>{selectedMsg.receivedAt.toLocaleString("vi-VN")}</span>
               </div>
             </div>
-
-            {/* Body */}
-            {selectedMsg.isHtml ? (
-              <EmailFrame html={selectedMsg.body} />
-            ) : (
-              <div className="px-6 py-5 text-sm text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">
+          </div>
+          {selectedMsg.isHtml
+            ? <EmailFrame html={selectedMsg.body} />
+            : <div style={{ padding: "24px 28px", color: "#cbd5e1", fontSize: "13px", lineHeight: 1.8, whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
                 {selectedMsg.body || "(Không có nội dung)"}
-              </div>
-            )}
-          </div>
+              </div>}
         </div>
       </div>
-    );
-  }
+    </div>
+  );
 
-  // ─────────────────────────────────────────────────────────────
-  // VIEW: Inbox list
-  // ─────────────────────────────────────────────────────────────
-  if (view === "inbox") {
-    return (
-      <div className="min-h-screen bg-[#0F172A] text-white">
-        <div className="mx-auto max-w-2xl px-4 py-8">
-          <button
-            onClick={() => setView("home")}
-            className="mb-6 flex items-center gap-2 text-slate-400 hover:text-amber-400 text-sm font-semibold transition-colors"
-          >
-            <ArrowLeft size={14} /> Tất cả địa chỉ
-          </button>
-
-          <div className="rounded-2xl bg-[#111827] border border-white/8 overflow-hidden">
-            {/* Inbox header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Inbox size={16} className="text-amber-400" />
-                  <span className="font-bold text-white text-sm">Hộp thư</span>
-                  {!loadingInbox && messages.length > 0 && (
-                    <span className="bg-amber-400/15 text-amber-400 border border-amber-400/30 text-xs font-bold px-2 py-0.5 rounded-full">
-                      {messages.length}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-500 mt-1 font-mono">{activeEmail}</p>
+  // ── Inbox list ─────────────────────────────────────────────
+  if (view === "inbox") return (
+    <div style={page}>
+      <div style={{ maxWidth: "680px", margin: "0 auto", padding: "32px 16px" }}>
+        <button style={backBtn} onClick={() => setView("home")}>
+          <ArrowLeft size={14} /> Tất cả địa chỉ
+        </button>
+        <div style={card}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Inbox size={16} color="#F59E0B" />
+                <span style={{ fontWeight: 700, fontSize: "14px" }}>Hộp thư</span>
+                {!loadingInbox && messages.length > 0 && (
+                  <span style={{ background: "rgba(245,158,11,0.15)", color: "#F59E0B", border: "1px solid rgba(245,158,11,0.3)", fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px" }}>
+                    {messages.length}
+                  </span>
+                )}
               </div>
-              <button
-                onClick={refreshInbox}
-                disabled={loadingInbox}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-amber-400 hover:border-amber-400/30 text-xs font-semibold transition-all"
-              >
-                {loadingInbox ? <Spinner /> : <RefreshCw size={13} />}
-                Làm mới
-              </button>
+              <p style={{ color: "#475569", fontSize: "11px", fontFamily: "monospace", margin: "4px 0 0" }}>{activeEmail}</p>
             </div>
+            <button
+              onClick={refreshInbox} disabled={loadingInbox}
+              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#94a3b8", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+            >
+              {loadingInbox ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={13} />}
+              Làm mới
+            </button>
+          </div>
 
-            {/* Messages */}
-            {loadingInbox ? (
-              <div className="py-16 flex flex-col items-center gap-3 text-slate-500">
-                <Spinner />
-                <span className="text-sm">Đang tải hộp thư...</span>
+          {loadingInbox ? (
+            <div style={{ padding: "60px 24px", textAlign: "center", color: "#475569" }}>
+              <Loader2 size={24} style={{ animation: "spin 1s linear infinite", margin: "0 auto 12px", display: "block" }} />
+              <p style={{ fontSize: "13px" }}>Đang tải hộp thư...</p>
+            </div>
+          ) : inboxError ? (
+            <div style={{ padding: "60px 24px", textAlign: "center", color: "#f87171", fontSize: "13px" }}>{inboxError}</div>
+          ) : messages.length === 0 ? (
+            <div style={{ padding: "60px 24px", textAlign: "center" }}>
+              <div style={{ width: "52px", height: "52px", borderRadius: "16px", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <Mail size={22} color="rgba(245,158,11,0.6)" />
               </div>
-            ) : inboxError ? (
-              <div className="py-16 text-center text-red-400 text-sm px-6">{inboxError}</div>
-            ) : messages.length === 0 ? (
-              <div className="py-16 text-center px-6">
-                <div className="w-12 h-12 rounded-2xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center mx-auto mb-4">
-                  <Mail size={22} className="text-amber-400/60" />
-                </div>
-                <p className="text-white font-semibold mb-1">Hộp thư đang trống</p>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                  Email mới sẽ xuất hiện tại đây sau khi có tin nhắn gửi đến địa chỉ của bạn.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-white/5">
-                {messages.map((msg) => (
-                  <button
-                    key={msg.id}
-                    onClick={() => { setSelectedMsg(msg); setView("message"); }}
-                    className="w-full text-left px-5 py-4 hover:bg-white/3 transition-colors group"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-white truncate group-hover:text-amber-300 transition-colors">
-                          {msg.from}
-                        </p>
-                        <p className="text-sm text-slate-400 truncate mt-0.5">{msg.subject}</p>
-                        <p className="text-xs text-slate-600 truncate mt-0.5">
-                          {msg.isHtml
-                            ? msg.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 80)
-                            : msg.body.slice(0, 80)}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <span className="text-xs text-slate-600 font-mono">
-                          {msg.receivedAt.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                        <ChevronRight size={14} className="text-slate-700 group-hover:text-amber-400 transition-colors" />
-                      </div>
+              <p style={{ color: "#f1f5f9", fontWeight: 600, margin: "0 0 6px" }}>Hộp thư đang trống</p>
+              <p style={{ color: "#475569", fontSize: "13px", maxWidth: "300px", margin: "0 auto", lineHeight: 1.6 }}>
+                Email mới sẽ xuất hiện tại đây sau khi có tin nhắn gửi đến địa chỉ của bạn.
+              </p>
+            </div>
+          ) : (
+            <div>
+              {messages.map((msg, i) => (
+                <button key={msg.id} onClick={() => { setSelectedMsg(msg); setView("message"); }}
+                  style={{ width: "100%", textAlign: "left", padding: "14px 24px", background: "none", border: "none", borderBottom: i < messages.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", cursor: "pointer", display: "block", transition: "background 0.12s" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "none")}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p style={{ color: "#f1f5f9", fontWeight: 700, fontSize: "13px", margin: "0 0 3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{msg.from}</p>
+                      <p style={{ color: "#94a3b8", fontSize: "13px", margin: "0 0 3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{msg.subject}</p>
+                      <p style={{ color: "#374151", fontSize: "11px", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {msg.isHtml ? msg.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) : msg.body.slice(0, 80)}
+                      </p>
                     </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Security note */}
-          <p className="mt-4 text-center text-xs text-slate-600 px-4">
-            🔒 Không nhập mật khẩu, mã khôi phục hoặc dữ liệu nhạy cảm vào email tạm thời.
-          </p>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", flexShrink: 0 }}>
+                      <span style={{ color: "#374151", fontSize: "11px", fontFamily: "monospace" }}>
+                        {msg.receivedAt.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                      <ChevronRight size={14} color="#374151" />
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+        <p style={{ marginTop: "16px", textAlign: "center", fontSize: "12px", color: "#374151" }}>
+          🔒 Không nhập mật khẩu hoặc dữ liệu nhạy cảm vào email tạm thời.
+        </p>
       </div>
-    );
-  }
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 
-  // ─────────────────────────────────────────────────────────────
-  // VIEW: Home
-  // ─────────────────────────────────────────────────────────────
+  // ── Home ───────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#0F172A] text-white overflow-x-hidden">
+    <div style={page}>
 
-      {/* ── Hero ─────────────────────────────────────────────── */}
-      <section className="relative pt-16 pb-12 px-4">
-        <HoneycombBackground />
+      {/* Hero */}
+      <section style={{ position: "relative", padding: "64px 16px 40px", textAlign: "center" }}>
+        <HoneycombBg />
+        {/* Glow */}
+        <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: "500px", height: "260px", background: "rgba(245,158,11,0.08)", filter: "blur(80px)", borderRadius: "50%", pointerEvents: "none" }} />
 
-        {/* Glow blobs */}
-        <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-amber-400/8 blur-[80px] rounded-full" />
-        <div className="pointer-events-none absolute top-20 left-1/4 w-[200px] h-[200px] bg-cyan-400/6 blur-[60px] rounded-full" />
-
-        <div className="relative mx-auto max-w-2xl text-center">
-          {/* Logo mark */}
-          <div className="inline-flex items-center gap-3 mb-6 px-4 py-2 rounded-full bg-amber-400/10 border border-amber-400/20">
-            <span className="text-xl">🐝</span>
-            <span className="text-amber-400 font-bold text-sm tracking-wide">BEE AI STORE</span>
+        <div style={{ position: "relative", maxWidth: "600px", margin: "0 auto" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "10px", padding: "6px 16px", borderRadius: "999px", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", marginBottom: "24px" }}>
+            <span style={{ fontSize: "18px" }}>🐝</span>
+            <span style={{ color: "#F59E0B", fontWeight: 700, fontSize: "13px", letterSpacing: "0.05em" }}>BEE AI STORE</span>
           </div>
 
-          <h1 className="text-4xl sm:text-5xl font-extrabold leading-tight mb-4">
-            <span className="text-white">Bee</span>
-            <span className="text-amber-400">Mail</span>
-            <br />
-            <span className="text-2xl sm:text-3xl font-semibold text-slate-300">
-              Email tạm thời nhanh, riêng tư
-            </span>
+          <h1 style={{ fontSize: "clamp(36px, 6vw, 52px)", fontWeight: 900, lineHeight: 1.1, margin: "0 0 12px", letterSpacing: "-0.02em" }}>
+            <span style={{ color: "#f1f5f9" }}>Bee</span>
+            <span style={{ color: "#F59E0B" }}>Mail</span>
           </h1>
-
-          <p className="text-slate-400 text-base mb-8 max-w-md mx-auto leading-relaxed">
+          <h2 style={{ fontSize: "clamp(18px, 3vw, 24px)", fontWeight: 600, color: "#94a3b8", margin: "0 0 20px" }}>
+            Email tạm thời nhanh, riêng tư và thông minh
+          </h2>
+          <p style={{ color: "#64748b", fontSize: "15px", lineHeight: 1.7, maxWidth: "440px", margin: "0 auto" }}>
             Tạo địa chỉ email tạm thời với domain{" "}
-            <span className="text-amber-400 font-mono font-semibold">@{EMAIL_DOMAIN}</span>{" "}
+            <span style={{ color: "#F59E0B", fontFamily: "monospace", fontWeight: 600 }}>@{EMAIL_DOMAIN}</span>{" "}
             để nhận mã xác thực, test tài khoản và tránh spam.
           </p>
         </div>
       </section>
 
-      {/* ── Email Generator Card ──────────────────────────────── */}
-      <section className="px-4 pb-10">
-        <div className="mx-auto max-w-md">
-          <div className="rounded-2xl bg-[#111827] border border-white/8 overflow-hidden shadow-2xl shadow-black/40">
-
-            {/* Card header */}
-            <div className="px-5 py-4 border-b border-white/8 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-xs font-semibold text-slate-400 tracking-widest uppercase">
-                Tạo địa chỉ email
-              </span>
+      {/* Generator card */}
+      <section style={{ padding: "0 16px 40px" }}>
+        <div style={{ maxWidth: "440px", margin: "0 auto" }}>
+          <div style={{ ...card, boxShadow: "0 25px 50px rgba(0,0,0,0.4)" }}>
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#F59E0B", animation: "pulse 2s infinite" }} />
+              <span style={{ fontSize: "11px", fontWeight: 700, color: "#475569", letterSpacing: "0.1em", textTransform: "uppercase" }}>Tạo địa chỉ email</span>
             </div>
 
-            <div className="p-5 space-y-4">
-              {/* Custom alias input */}
-              <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2 block">
-                  Tên tùy chỉnh
-                </label>
-                <div className={`flex items-center bg-[#0F172A] rounded-xl border transition-colors ${
-                  aliasError ? "border-red-500/50" : "border-white/10 focus-within:border-amber-400/40"
-                }`}>
-                  <input
-                    value={customAlias}
-                    onChange={(e) => {
-                      setCustomAlias(e.target.value.replace(/[^a-z0-9._-]/gi, "").toLowerCase());
-                      setAliasError("");
-                    }}
-                    onKeyDown={(e) => e.key === "Enter" && customAlias.trim() && handleCustomEmail()}
-                    placeholder="ten-cua-ban"
-                    maxLength={30}
-                    className="flex-1 bg-transparent outline-none text-white placeholder:text-slate-600 text-sm font-mono px-4 py-3"
-                  />
-                  <span className="text-slate-600 text-xs font-mono pr-4 shrink-0">
-                    @{EMAIL_DOMAIN}
-                  </span>
-                </div>
-                {aliasError && (
-                  <p className="text-red-400 text-xs mt-1.5 ml-1">{aliasError}</p>
-                )}
-
-                <button
-                  onClick={handleCustomEmail}
-                  disabled={generating || !customAlias.trim()}
-                  className={`mt-2 w-full py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                    customAlias.trim() && !generating
-                      ? "bg-amber-400/15 border border-amber-400/30 text-amber-400 hover:bg-amber-400/25"
-                      : "bg-white/3 border border-white/8 text-slate-600 cursor-not-allowed"
-                  }`}
-                >
-                  {generating ? <Spinner /> : null}
-                  Tạo địa chỉ này
-                </button>
+            <div style={{ padding: "20px" }}>
+              {/* Custom alias */}
+              <label style={labelStyle}>Tên tùy chỉnh</label>
+              <div style={{
+                display: "flex", alignItems: "center",
+                background: "#0F172A", borderRadius: "12px",
+                border: `1px solid ${aliasError ? "rgba(248,113,113,0.5)" : "rgba(255,255,255,0.1)"}`,
+                transition: "border-color 0.2s",
+              }}>
+                <input
+                  value={customAlias}
+                  onChange={e => { setCustomAlias(e.target.value.replace(/[^a-z0-9._-]/gi, "").toLowerCase()); setAliasError(""); }}
+                  onKeyDown={e => e.key === "Enter" && customAlias.trim() && createEmail(customAlias.trim())}
+                  placeholder="ten-cua-ban"
+                  maxLength={30}
+                  style={{ flex: 1, background: "none", border: "none", outline: "none", color: "#f1f5f9", fontSize: "14px", fontFamily: "monospace", padding: "12px 14px" }}
+                />
+                <span style={{ color: "#374151", fontSize: "12px", fontFamily: "monospace", paddingRight: "14px", flexShrink: 0 }}>@{EMAIL_DOMAIN}</span>
               </div>
+              {aliasError && <p style={{ color: "#f87171", fontSize: "11px", margin: "6px 0 0 4px" }}>{aliasError}</p>}
+
+              <button
+                onClick={() => { const t = customAlias.trim(); const err = validateAlias(t); if (err) { setAliasError(err); return; } createEmail(t); }}
+                disabled={generating || !customAlias.trim()}
+                style={{
+                  marginTop: "10px", width: "100%", padding: "11px",
+                  borderRadius: "12px", fontSize: "13px", fontWeight: 700,
+                  cursor: customAlias.trim() && !generating ? "pointer" : "not-allowed",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+                  background: customAlias.trim() ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.03)",
+                  border: `1px solid ${customAlias.trim() ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)"}`,
+                  color: customAlias.trim() ? "#F59E0B" : "#374151",
+                  transition: "all 0.2s",
+                }}
+              >
+                {generating && customAlias ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : null}
+                Tạo địa chỉ này
+              </button>
 
               {/* Divider */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-white/8" />
-                <span className="text-slate-600 text-xs font-semibold uppercase tracking-widest">hoặc</span>
-                <div className="flex-1 h-px bg-white/8" />
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "16px 0" }}>
+                <div style={{ flex: 1, ...divider, margin: 0 }} />
+                <span style={{ color: "#374151", fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em" }}>HOẶC</span>
+                <div style={{ flex: 1, ...divider, margin: 0 }} />
               </div>
 
               {/* Random button */}
               <button
-                onClick={handleRandomEmail}
+                onClick={() => createEmail()}
                 disabled={generating}
-                className="w-full py-3.5 rounded-xl font-extrabold text-sm tracking-wide flex items-center justify-center gap-2 transition-all
-                  bg-gradient-to-r from-amber-400 to-amber-500 text-[#0F172A]
-                  hover:from-amber-300 hover:to-amber-400
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                  shadow-lg shadow-amber-400/20"
+                style={{
+                  width: "100%", padding: "14px",
+                  background: "linear-gradient(135deg, #F59E0B, #FACC15)",
+                  border: "none", borderRadius: "12px",
+                  color: "#0F172A", fontSize: "14px", fontWeight: 800, letterSpacing: "0.03em",
+                  cursor: generating ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+                  boxShadow: "0 8px 24px rgba(245,158,11,0.25)",
+                  opacity: generating ? 0.7 : 1,
+                  transition: "opacity 0.2s",
+                }}
               >
-                {generating ? (
-                  <><Loader2 size={15} className="animate-spin" /> Đang tạo...</>
-                ) : (
-                  <><Zap size={15} /> Random Email</>
-                )}
+                {generating
+                  ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> Đang tạo...</>
+                  : <><Zap size={15} /> Random Email</>}
               </button>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ── Address List ─────────────────────────────────────── */}
+      {/* Address list */}
       {addresses.length > 0 && (
-        <section className="px-4 pb-10">
-          <div className="mx-auto max-w-md">
-            <div className="rounded-2xl bg-[#111827] border border-white/8 overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-white/8">
-                <span className="text-xs text-slate-500 font-semibold uppercase tracking-widest">
-                  Địa chỉ đã tạo — {addresses.length}
-                </span>
-              </div>
-              <div className="divide-y divide-white/5">
-                {addresses.map((addr) => (
-                  <div
-                    key={addr}
-                    className="flex items-center justify-between px-5 py-3.5 hover:bg-white/3 transition-colors"
-                  >
-                    <span className="text-sm font-mono text-slate-400 truncate mr-3 flex-1">
-                      {addr}
-                    </span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => openInbox(addr)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-400/10 border border-amber-400/25 text-amber-400 text-xs font-bold hover:bg-amber-400/20 transition-colors"
-                      >
-                        <Inbox size={11} /> Inbox
-                      </button>
-                      <CopyBtn text={addr} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+        <section style={{ padding: "0 16px 40px" }}>
+          <div style={{ maxWidth: "440px", margin: "0 auto", ...card }}>
+            <div style={{ padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <span style={{ fontSize: "11px", fontWeight: 700, color: "#374151", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                Địa chỉ đã tạo — {addresses.length}
+              </span>
             </div>
+            {addresses.map((addr, i) => (
+              <div key={addr}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 20px", borderBottom: i < addresses.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", transition: "background 0.12s" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "none")}
+              >
+                <span style={{ color: "#64748b", fontSize: "12px", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, marginRight: "12px" }}>{addr}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                  <button onClick={() => openInbox(addr)}
+                    style={{ display: "flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "8px", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#F59E0B", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>
+                    <Inbox size={11} /> Inbox
+                  </button>
+                  <CopyBtn text={addr} />
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       )}
 
-      {/* ── Features ─────────────────────────────────────────── */}
-      <section className="px-4 py-12 border-t border-white/5">
-        <div className="mx-auto max-w-2xl">
-          <h2 className="text-center text-xl font-bold text-white mb-8">
-            Tại sao chọn <span className="text-amber-400">BeeMail</span>?
+      {/* Features */}
+      <section style={{ padding: "40px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+        <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+          <h2 style={{ textAlign: "center", fontSize: "20px", fontWeight: 800, margin: "0 0 32px" }}>
+            Tại sao chọn <span style={{ color: "#F59E0B" }}>BeeMail</span>?
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "14px" }}>
             {[
-              { icon: Shield, title: "Riêng tư", desc: "Không yêu cầu đăng nhập hay thông tin cá nhân" },
-              { icon: Zap, title: "Tức thì", desc: "Tạo email trong vài giây, nhận mail ngay lập tức" },
-              { icon: UserX, title: "Không spam", desc: "Dùng cho đăng ký dịch vụ, bảo vệ email chính" },
-              { icon: Mail, title: "Nhận OTP", desc: "Hoàn hảo để xác minh tài khoản và nhận mã" },
-            ].map(({ icon: Icon, title, desc }) => (
-              <div
-                key={title}
-                className="rounded-2xl bg-[#111827] border border-white/8 p-4 hover:border-amber-400/20 transition-colors"
+              { Icon: Shield, title: "Riêng tư", desc: "Không yêu cầu đăng nhập hay thông tin cá nhân" },
+              { Icon: Zap, title: "Tức thì", desc: "Tạo email trong vài giây, nhận mail ngay lập tức" },
+              { Icon: UserX, title: "Không spam", desc: "Bảo vệ email chính của bạn khỏi quảng cáo" },
+              { Icon: Mail, title: "Nhận OTP", desc: "Hoàn hảo để xác minh tài khoản và nhận mã" },
+            ].map(({ Icon, title, desc }) => (
+              <div key={title} style={{ ...card, padding: "18px", transition: "border-color 0.2s" }}
+                onMouseEnter={e => ((e.currentTarget as HTMLDivElement).style.borderColor = "rgba(245,158,11,0.2)")}
+                onMouseLeave={e => ((e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.08)")}
               >
-                <div className="w-9 h-9 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center mb-3">
-                  <Icon size={17} className="text-amber-400" />
+                <div style={{ width: "38px", height: "38px", borderRadius: "12px", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "12px" }}>
+                  <Icon size={17} color="#F59E0B" />
                 </div>
-                <p className="text-white font-semibold text-sm mb-1">{title}</p>
-                <p className="text-slate-500 text-xs leading-relaxed">{desc}</p>
+                <p style={{ color: "#f1f5f9", fontWeight: 700, fontSize: "14px", margin: "0 0 6px" }}>{title}</p>
+                <p style={{ color: "#475569", fontSize: "12px", lineHeight: 1.6, margin: 0 }}>{desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── Security note ────────────────────────────────────── */}
-      <section className="px-4 py-8">
-        <div className="mx-auto max-w-md">
-          <div className="rounded-2xl bg-amber-400/5 border border-amber-400/15 p-5 flex gap-4">
-            <Shield size={20} className="text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-amber-300 font-semibold text-sm mb-1">Lưu ý bảo mật</p>
-              <p className="text-slate-400 text-xs leading-relaxed">
-                Không nhập mật khẩu, mã khôi phục hoặc dữ liệu nhạy cảm vào email tạm thời.
-                BeeMail được thiết kế để nhận OTP và xác minh tài khoản, không phải lưu trữ thông tin quan trọng.
-              </p>
-            </div>
+      {/* Security */}
+      <section style={{ padding: "0 16px 40px" }}>
+        <div style={{ maxWidth: "440px", margin: "0 auto", background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: "16px", padding: "20px", display: "flex", gap: "16px" }}>
+          <Shield size={20} color="#F59E0B" style={{ flexShrink: 0, marginTop: "2px" }} />
+          <div>
+            <p style={{ color: "#FCD34D", fontWeight: 600, fontSize: "14px", margin: "0 0 6px" }}>Lưu ý bảo mật</p>
+            <p style={{ color: "#64748b", fontSize: "13px", lineHeight: 1.6, margin: 0 }}>
+              Không nhập mật khẩu, mã khôi phục hoặc dữ liệu nhạy cảm vào email tạm thời. BeeMail dành cho OTP và xác minh tài khoản.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* ── Footer ───────────────────────────────────────────── */}
-      <footer className="px-4 py-8 border-t border-white/5">
-        <div className="mx-auto max-w-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
-          <div className="flex items-center gap-2">
-            <span className="text-base">🐝</span>
-            <span className="font-bold text-slate-500">Bee AI Store</span>
+      {/* Footer */}
+      <footer style={{ padding: "24px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+        <div style={{ maxWidth: "600px", margin: "0 auto", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px", fontSize: "12px", color: "#374151" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "16px" }}>🐝</span>
+            <span style={{ fontWeight: 700, color: "#475569" }}>Bee AI Store</span>
             <span>·</span>
-            <span className="font-mono">mail.beeaistore.site</span>
+            <span style={{ fontFamily: "monospace" }}>mail.beeaistore.site</span>
           </div>
           <span>Email tạm thời — không lưu dữ liệu nhạy cảm</span>
         </div>
       </footer>
 
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      `}</style>
     </div>
   );
 }
