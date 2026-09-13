@@ -1,0 +1,183 @@
+﻿{
+    "result":  {
+                   "deployments":  [
+                                       {
+                                           "id":  "159fb7e2-66bf-473d-8b33-d84095fb216d",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "c53d0060-797d-4bf3-bd47-6c9ada8c1e5e",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-07-26T14:18:31.650224Z"
+                                       },
+                                       {
+                                           "id":  "72b05475-376d-498c-8158-8e71f936cc3e",
+                                           "source":  "dash",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Deployed version 20437b56",
+                                                               "workers/triggered_by":  "deployment"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "20437b56-e81f-40c1-bf77-7521c38b32f0",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-07-26T12:42:19.443021Z"
+                                       },
+                                       {
+                                           "id":  "6c23bd0f-6e83-488c-bbb3-8e04c7cb8861",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "2a51fea2-919d-4356-9649-b639ddafd312",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:30:36.79074Z"
+                                       },
+                                       {
+                                           "id":  "1941f173-42ae-4e1b-ad18-e471bde490f7",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "67caac82-ee88-45f8-8964-204c052b58eb",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:25:08.2948Z"
+                                       },
+                                       {
+                                           "id":  "19a05637-f993-4701-9561-488b9545f644",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "3784fe42-cd88-47aa-a711-8c0020a71295",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:24:28.765745Z"
+                                       },
+                                       {
+                                           "id":  "1bc5cef5-5a2d-4b06-b326-e35c502dce60",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "698ac09f-4100-481e-89ed-809820dcff64",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:22:26.615718Z"
+                                       },
+                                       {
+                                           "id":  "50dfde61-54af-4b03-a8f3-da4cff4dd64e",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "345b982d-0897-40f6-88e5-3442c6eef1cb",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:20:48.485871Z"
+                                       },
+                                       {
+                                           "id":  "b1c01444-0de6-4063-98d7-dca3d3c3ac20",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "5d7d815f-d4fc-4c32-a2a3-ea4f538a2d00",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:18:30.049266Z"
+                                       },
+                                       {
+                                           "id":  "c87dad8c-0de8-4c4e-89ff-3daf69332f33",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "16215b71-cdad-4be7-aa24-90792eda7f5b",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:08:35.267249Z"
+                                       },
+                                       {
+                                           "id":  "41559387-1270-41b5-9942-beafcb9f073e",
+                                           "source":  "quick_editor",
+                                           "strategy":  "percentage",
+                                           "author_email":  "nhocrong111@gmail.com",
+                                           "annotations":  {
+                                                               "workers/message":  "Automatic deployment on upload.",
+                                                               "workers/triggered_by":  "upload"
+                                                           },
+                                           "versions":  [
+                                                            {
+                                                                "version_id":  "1537861c-5aee-4faf-b586-888703c27cdb",
+                                                                "percentage":  100
+                                                            }
+                                                        ],
+                                           "created_on":  "2026-05-10T20:06:24.180999Z"
+                                       }
+                                   ]
+               },
+    "success":  true,
+    "errors":  [
+
+               ],
+    "messages":  [
+
+                 ]
+}

@@ -1,0 +1,46 @@
+﻿{
+    "result":  {
+                   "placement":  {
+
+                                 },
+                   "compatibility_date":  "2000-01-01",
+                   "compatibility_flags":  [
+
+                                           ],
+                   "usage_model":  "standard",
+                   "tags":  [
+
+                            ],
+                   "tail_consumers":  [
+
+                                      ],
+                   "logpush":  false,
+                   "annotations":  {
+                                       "workers/triggered_by":  "upload"
+                                   },
+                   "bindings":  [
+                                    {
+                                        "database_id":  "beee7b73-5a7b-461e-bbbf-f888e456dcab",
+                                        "id":  "beee7b73-5a7b-461e-bbbf-f888e456dcab",
+                                        "name":  "DB",
+                                        "type":  "d1"
+                                    },
+                                    {
+                                        "name":  "SUPABASE_SERVICE_KEY",
+                                        "type":  "secret_text"
+                                    },
+                                    {
+                                        "name":  "SUPABASE_URL",
+                                        "text":  "https://afhbwspoayjxpzlipvsm.supabase.co",
+                                        "type":  "plain_text"
+                                    }
+                                ]
+               },
+    "success":  true,
+    "errors":  [
+
+               ],
+    "messages":  [
+
+                 ]
+}

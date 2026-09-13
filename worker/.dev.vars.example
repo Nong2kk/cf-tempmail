@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+INBOX_TOKEN_SECRET=change-me-long-random-string
+ALLOWED_ORIGINS=https://mail.beeaistore.site,http://localhost:3000
+LEGACY_INBOX_ENABLED=1
+# TEST_TRACE=1   # adds X-D1-Queries header; local tests only

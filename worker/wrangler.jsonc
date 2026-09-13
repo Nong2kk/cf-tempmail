@@ -1,0 +1,61 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tempmail-inbox-worker",
+  "main": "src/index.js",
+  "account_id": "284f08c377c329661b9cca2e6a2adc47",
+
+  // Unchanged from the currently deployed v14 on purpose: this rollout is a
+  // security change only. Bumping the date is a separate phase (tests pass on
+  // 2026-03-01 too, see README).
+  "compatibility_date": "2000-01-01",
+
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // Existing plain-text vars/secrets on the Worker (SUPABASE_URL, SUPABASE_SERVICE_KEY)
+  // are left untouched by `wrangler deploy`. They are unused; cleanup is tracked in README.
+  "keep_vars": true,
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": true },
+    "traces": { "enabled": false }
+  },
+
+  "vars": {
+    "EMAIL_DOMAIN": "beeaistore.site",
+    "ALLOWED_ORIGINS": "https://mail.beeaistore.site,https://cf-tempmail.vercel.app",
+    // Zero-downtime switch. "1" keeps GET /api/inbox (no token, v14 response shape) alive
+    // for the old frontend. Set to "0" and redeploy once the new frontend is verified.
+    "LEGACY_INBOX_ENABLED": "1"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tempmail-db",
+      "database_id": "beee7b73-5a7b-461e-bbbf-f888e456dcab",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Native Workers rate limiting (no D1 involved). Counters are per-colo and
+  // eventually consistent — good enough to keep abuse away from D1.
+  "ratelimits": [
+    { "name": "RL_IP",   "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_ADDR", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_MAIL", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } },
+    // Alias creation (called server-to-server by Vercel /api/create via /api/v2/create-permit).
+    { "name": "RL_CREATE_IP",     "namespace_id": "1004", "simple": { "limit": 5,  "period": 60 } },
+    { "name": "RL_CREATE_GLOBAL", "namespace_id": "1005", "simple": { "limit": 60, "period": 60 } }
+  ],
+
+  // Retention cleanup (24h, batch 500). `wrangler deploy` creates this trigger.
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  }
+
+  // Secrets (set with `wrangler secret put`, never in this file):
+  //   INBOX_TOKEN_SECRET  — shared with the Next.js /api/create route on Vercel
+}

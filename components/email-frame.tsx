@@ -47,6 +47,10 @@ export function EmailFrame({ html }: EmailFrameProps) {
       ref={iframeRef}
       src={blobUrl}
       onLoad={handleLoad}
+      // No tokens granted: blocks script execution, top-navigation, popups, form
+      // submission, and gives the content an opaque origin with no access to
+      // BeeMail's storage/cookies. Required because email HTML is untrusted input.
+      sandbox=""
       style={{ width: "100%", height, border: "none", display: "block", borderRadius: "0 0 16px 16px" }}
       title="email-content"
     />

@@ -16,12 +16,49 @@ import {
   Zap,
 } from "lucide-react";
 import { EmailFrame } from "@/components/email-frame";
-import { fetchInbox } from "@/lib/inbox-service";
+import { fetchInbox, fetchMessage, TOKEN_EXPIRED_MESSAGE } from "@/lib/inbox-service";
 import { validateAlias } from "@/lib/email-generator";
-import type { InboxMessage } from "@/types/email";
+import type { CreateEmailResponse, InboxMessage, SavedAddress } from "@/types/email";
 
 const EMAIL_DOMAIN = process.env.NEXT_PUBLIC_EMAIL_DOMAIN ?? "beeaistore.site";
-const STORAGE_KEY = "beemail-addresses";
+const LEGACY_STORAGE_KEY = "beemail-addresses"; // string[] — pre-token format, read once for migration
+const STORAGE_KEY = "beemail-inboxes-v2"; // SavedAddress[]
+const LEGACY_INBOX_MESSAGE =
+  "Địa chỉ này được tạo trước bản cập nhật bảo mật nên không thể mở hộp thư nữa. Hãy tạo địa chỉ mới.";
+
+function loadSavedAddresses(): SavedAddress[] {
+  try {
+    const v2 = localStorage.getItem(STORAGE_KEY);
+    if (v2) {
+      const parsed = JSON.parse(v2) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((x): x is SavedAddress => Boolean(x) && typeof (x as SavedAddress).email === "string")
+          .map((x) => ({
+            email: x.email,
+            accessToken: typeof x.accessToken === "string" ? x.accessToken : null,
+            expiresAt: typeof x.expiresAt === "number" ? x.expiresAt : null,
+          }));
+      }
+    }
+    const v1 = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (v1) {
+      const parsed = JSON.parse(v1) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((x): x is string => typeof x === "string")
+          .map((email) => ({ email, accessToken: null, expiresAt: null }));
+      }
+    }
+  } catch {
+    // Ignore invalid localStorage data.
+  }
+  return [];
+}
+
+function isExpired(saved: SavedAddress): boolean {
+  return saved.expiresAt !== null && Date.now() >= saved.expiresAt;
+}
 
 type View = "home" | "inbox" | "message";
 
@@ -323,15 +360,18 @@ function FeatureCard({ Icon, title, desc }: Feature) {
 
 export default function HomePage() {
   const [view, setView] = useState<View>("home");
-  const [addresses, setAddresses] = useState<string[]>([]);
+  const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [customAlias, setCustomAlias] = useState("");
   const [aliasError, setAliasError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [activeEmail, setActiveEmail] = useState("");
+  const [activeToken, setActiveToken] = useState<string | null>(null);
   const [messages, setMessages] = useState<InboxMessage[]>([]);
   const [loadingInbox, setLoadingInbox] = useState(false);
   const [inboxError, setInboxError] = useState("");
   const [selectedMsg, setSelectedMsg] = useState<InboxMessage | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState(false);
+  const [messageError, setMessageError] = useState("");
 
   const features = useMemo<Feature[]>(
     () => [
@@ -345,16 +385,10 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setAddresses(JSON.parse(saved));
-    } catch {
-      // Ignore invalid localStorage data.
-    }
+    setAddresses(loadSavedAddresses());
   }, []);
 
-  const persist = (list: string[]) => {
+  const persist = (list: SavedAddress[]) => {
     if (typeof window !== "undefined") {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
     }
@@ -370,11 +404,11 @@ export default function HomePage() {
       try {
         const response = await fetch("/api/create", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-BeeMail-Client": "web" },
           body: JSON.stringify(alias ? { alias } : {}),
         });
 
-        const data = (await response.json()) as { success: boolean; email?: string; error?: string };
+        const data = (await response.json()) as CreateEmailResponse;
 
         if (!data.success || !data.email) {
           setAliasError(data.error ?? "Tạo email thất bại");
@@ -382,9 +416,19 @@ export default function HomePage() {
         }
 
         setCustomAlias("");
-        const updated = [data.email, ...addresses.filter((address) => address !== data.email)];
+        const entry: SavedAddress = {
+          email: data.email,
+          accessToken: data.accessToken ?? null,
+          expiresAt: data.expiresAt ?? null,
+        };
+        const updated = [entry, ...addresses.filter((saved) => saved.email !== data.email)];
         setAddresses(updated);
         persist(updated);
+
+        // Dev-only mock email (no real Cloudflare rule) — must never look identical to a real success.
+        if (data.mock) {
+          setAliasError("⚠️ Chế độ dev: email demo, CHƯA tạo Cloudflare Email Routing Rule thật.");
+        }
       } catch {
         setAliasError("Không kết nối được máy chủ. Thử lại sau nhé.");
       } finally {
@@ -394,31 +438,60 @@ export default function HomePage() {
     [addresses, generating]
   );
 
-  const openInbox = async (address: string) => {
-    setActiveEmail(address);
+  const openInbox = async (saved: SavedAddress) => {
+    setActiveEmail(saved.email);
+    setActiveToken(saved.accessToken);
     setSelectedMsg(null);
+    setMessages([]);
     setView("inbox");
-    setLoadingInbox(true);
     setInboxError("");
 
-    const result = await fetchInbox(address);
+    if (!saved.accessToken) {
+      setInboxError(LEGACY_INBOX_MESSAGE);
+      return;
+    }
+    if (isExpired(saved)) {
+      setInboxError(TOKEN_EXPIRED_MESSAGE);
+      return;
+    }
+
+    setLoadingInbox(true);
+    const result = await fetchInbox(saved.email, saved.accessToken);
     if (result.success) setMessages(result.messages ?? []);
     else setInboxError(result.error ?? "Không tải được hộp thư");
-
     setLoadingInbox(false);
   };
 
   const refreshInbox = async () => {
     if (!activeEmail || loadingInbox) return;
+    if (!activeToken) {
+      setInboxError(LEGACY_INBOX_MESSAGE);
+      return;
+    }
 
     setLoadingInbox(true);
     setInboxError("");
 
-    const result = await fetchInbox(activeEmail);
+    const result = await fetchInbox(activeEmail, activeToken);
     if (result.success) setMessages(result.messages ?? []);
     else setInboxError(result.error ?? "Lỗi tải hộp thư");
 
     setLoadingInbox(false);
+  };
+
+  const openMessage = async (message: InboxMessage) => {
+    if (!activeEmail || !activeToken) return;
+
+    setSelectedMsg(message);
+    setMessageError("");
+    setLoadingMessage(true);
+    setView("message");
+
+    const result = await fetchMessage(activeEmail, activeToken, message.id);
+    if (result.success && result.message) setSelectedMsg(result.message);
+    else setMessageError(result.error ?? "Không tải được nội dung thư");
+
+    setLoadingMessage(false);
   };
 
   const createCustomEmail = () => {
@@ -453,8 +526,17 @@ export default function HomePage() {
               </div>
             </header>
 
-            {selectedMsg.isHtml ? (
-              <EmailFrame html={selectedMsg.body} />
+            {loadingMessage ? (
+              <div style={{ padding: "48px 24px", textAlign: "center", color: colors.muted }}>
+                <Loader2 size={24} className="spin" style={{ marginBottom: "10px" }} />
+                <p style={{ margin: 0, fontWeight: 800 }}>Đang tải nội dung...</p>
+              </div>
+            ) : messageError ? (
+              <div style={{ padding: "48px 24px", textAlign: "center", color: colors.danger, fontWeight: 800 }}>
+                {messageError}
+              </div>
+            ) : selectedMsg.isHtml ? (
+              <EmailFrame html={selectedMsg.body ?? ""} />
             ) : (
               <div
                 style={{
@@ -581,7 +663,7 @@ export default function HomePage() {
                   <button
                     key={message.id}
                     type="button"
-                    onClick={() => { setSelectedMsg(message); setView("message"); }}
+                    onClick={() => openMessage(message)}
                     style={{
                       width: "100%",
                       display: "flex",
@@ -606,9 +688,7 @@ export default function HomePage() {
                         {message.subject || "(Không có tiêu đề)"}
                       </p>
                       <p style={{ margin: 0, color: colors.muted, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {message.isHtml
-                          ? message.body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 96)
-                          : message.body.slice(0, 96)}
+                        {message.preview.slice(0, 96)}
                       </p>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", color: colors.soft, fontSize: "12px", flexShrink: 0 }}>
@@ -799,9 +879,9 @@ export default function HomePage() {
                 </span>
               </div>
 
-              {addresses.map((address, index) => (
+              {addresses.map((saved, index) => (
                 <div
-                  key={address}
+                  key={saved.email}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -811,22 +891,28 @@ export default function HomePage() {
                     borderBottom: index < addresses.length - 1 ? `1px solid ${colors.line}` : "none",
                   }}
                 >
-                  <span style={{ minWidth: 0, flex: 1, color: colors.navy, fontSize: "14px", fontFamily: "monospace", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {address}
+                  <span style={{ minWidth: 0, flex: 1, color: saved.accessToken && !isExpired(saved) ? colors.navy : colors.soft, fontSize: "14px", fontFamily: "monospace", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {saved.email}
+                    {(!saved.accessToken || isExpired(saved)) && (
+                      <span style={{ marginLeft: "8px", fontSize: "11px", fontFamily: "inherit", fontWeight: 700, color: colors.soft }}>
+                        {saved.accessToken ? "(hết hạn)" : "(địa chỉ cũ)"}
+                      </span>
+                    )}
                   </span>
                   <div style={{ display: "flex", alignItems: "center", gap: "9px", flexShrink: 0 }}>
                     <button
                       type="button"
-                      onClick={() => openInbox(address)}
+                      onClick={() => openInbox(saved)}
+                      title={!saved.accessToken ? LEGACY_INBOX_MESSAGE : isExpired(saved) ? TOKEN_EXPIRED_MESSAGE : undefined}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         gap: "7px",
                         padding: "9px 13px",
                         borderRadius: "12px",
-                        border: "1px solid #f1c35b",
-                        background: "#fff8df",
-                        color: colors.amber,
+                        border: saved.accessToken && !isExpired(saved) ? "1px solid #f1c35b" : "1px solid #e4e7ec",
+                        background: saved.accessToken && !isExpired(saved) ? "#fff8df" : "#f6f7f9",
+                        color: saved.accessToken && !isExpired(saved) ? colors.amber : colors.soft,
                         cursor: "pointer",
                         fontSize: "12px",
                         fontWeight: 950,
@@ -834,7 +920,7 @@ export default function HomePage() {
                     >
                       <Inbox size={13} /> Inbox
                     </button>
-                    <CopyButton text={address} />
+                    <CopyButton text={saved.email} />
                   </div>
                 </div>
               ))}

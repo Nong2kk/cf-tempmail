@@ -1,0 +1,20 @@
+-- OPTIONAL — NOT part of the migration sequence (note the .txt suffix so
+-- `wrangler d1 migrations apply` ignores it). Decision recorded in README.
+--
+-- Would make the retention DELETE use an index instead of a table scan:
+--   CREATE INDEX IF NOT EXISTS idx_created_at ON emails(created_at);
+--   -- rollback: DROP INDEX IF EXISTS idx_created_at;
+--
+-- Cost/benefit measured against production (2026-09-13):
+--   * Every INSERT currently writes 3 rows (row + idx_email + sqlite_sequence).
+--     This index makes it 4 → +33% rows_written on EVERY incoming mail, forever.
+--   * The cleanup runs 4×/day. With 24h retention the table holds ~1–2 days of
+--     mail. At today's volume (~3 mail/day, peak 24) that is < 100 rows per scan;
+--     even at 5,000 mail/day it is ~10k rows_read per run = 40k/day, i.e. 0.8% of
+--     the free 5M rows_read/day.
+--   * Break-even: the index only pays off when daily mail volume exceeds roughly
+--     (rows_read budget you care about) / 4 scans. Nowhere near that.
+--
+-- Verdict: do not apply now. Revisit if `cleanup` log lines report deleted
+-- counts in the thousands per run or if the table is allowed to grow beyond
+-- ~50k rows.

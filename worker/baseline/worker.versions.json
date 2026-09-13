@@ -1,0 +1,213 @@
+﻿{
+    "result":  {
+                   "items":  [
+                                 {
+                                     "id":  "c53d0060-797d-4bf3-bd47-6c9ada8c1e5e",
+                                     "number":  14,
+                                     "metadata":  {
+                                                      "created_on":  "2026-07-26T14:18:31.650224Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "20437b56-e81f-40c1-bf77-7521c38b32f0",
+                                     "number":  13,
+                                     "metadata":  {
+                                                      "created_on":  "2026-07-26T12:42:18.022328Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/message":  "Added D1 database binding DB",
+                                                         "workers/triggered_by":  "version_upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "2a51fea2-919d-4356-9649-b639ddafd312",
+                                     "number":  12,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:30:36.79074Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "67caac82-ee88-45f8-8964-204c052b58eb",
+                                     "number":  11,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:25:08.2948Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "3784fe42-cd88-47aa-a711-8c0020a71295",
+                                     "number":  10,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:24:28.765745Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "698ac09f-4100-481e-89ed-809820dcff64",
+                                     "number":  9,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:22:26.615718Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "345b982d-0897-40f6-88e5-3442c6eef1cb",
+                                     "number":  8,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:20:48.485871Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "5d7d815f-d4fc-4c32-a2a3-ea4f538a2d00",
+                                     "number":  7,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:18:30.049266Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "16215b71-cdad-4be7-aa24-90792eda7f5b",
+                                     "number":  6,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:08:35.267249Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "1537861c-5aee-4faf-b586-888703c27cdb",
+                                     "number":  5,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:06:24.180999Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "cdd55e9b-703e-4ae6-8d0c-e6431c372ecf",
+                                     "number":  4,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T20:02:08.806116Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "bfe7566f-5c2d-4ab0-9a16-e306eb6b5050",
+                                     "number":  3,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T19:37:23.774278Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/message":  "Add secret: SUPABASE_URL SUPABASE_SERVICE_KEY",
+                                                         "workers/triggered_by":  "version_upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "78a389f0-bedf-4b14-b31f-4c46f376a375",
+                                     "number":  2,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T19:32:32.34135Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 },
+                                 {
+                                     "id":  "40cbbd89-6430-4c7e-bd1e-4108e3108b5e",
+                                     "number":  1,
+                                     "metadata":  {
+                                                      "created_on":  "2026-05-10T19:31:39.564873Z",
+                                                      "source":  "dash",
+                                                      "author_id":  "e9c3287d3db1874cfa081082dad65d27",
+                                                      "author_email":  "nhocrong111@gmail.com",
+                                                      "has_preview":  true
+                                                  },
+                                     "annotations":  {
+                                                         "workers/triggered_by":  "upload"
+                                                     }
+                                 }
+                             ]
+               },
+    "success":  true,
+    "errors":  null,
+    "messages":  null,
+    "result_info":  {
+                        "page":  1,
+                        "per_page":  50,
+                        "count":  14,
+                        "total_count":  14
+                    }
+}

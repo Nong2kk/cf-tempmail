@@ -1,16 +1,16 @@
 // lib/inbox-service.ts
-// BeeMail — lấy mail trực tiếp từ Cloudflare Worker (D1)
-// Giữ nguyên bộ giải mã MIME encoded-word cho tiêu đề/người gửi
+// BeeMail — API client for the Cloudflare Worker (D1-backed inbox).
+// Every read carries the inbox ownership token; the Worker rejects reads without it.
 
-import type { InboxMessage } from "@/types/email";
+import type { FetchInboxResponse, FetchMessageResponse, InboxErrorCode, InboxMessage } from "@/types/email";
 
-// ─── Địa chỉ Worker ───────────────────────────────────────────────────────────
+// ─── Worker address ───────────────────────────────────────────────────────────
 
 const WORKER_URL =
   process.env.NEXT_PUBLIC_WORKER_URL ??
   "https://tempmail-inbox-worker.nhocrong111.workers.dev";
 
-// ─── MIME Encoded-Word Decoder (GIỮ NGUYÊN TỪ BẢN CŨ) ────────────────────────
+// ─── MIME Encoded-Word Decoder ────────────────────────────────────────────────
 // Handles =?UTF-8?Q?...?= and =?UTF-8?B?...?= (also iso-8859-1 etc.)
 
 function decodeMimeWord(encoded: string): string {
@@ -69,50 +69,122 @@ function decodeMimeHeader(header: string): string {
   return decodeMimeWord(unfolded).trim();
 }
 
-// ─── Kiểu dữ liệu Worker trả về ───────────────────────────────────────────────
+// ─── Worker response shapes ───────────────────────────────────────────────────
 
-interface WorkerRow {
+interface WorkerListItem {
   id: number;
+  subject: string | null;
+  from_email: string | null;
+  created_at: string | null;
+  preview: string | null;
+}
+
+interface WorkerListResponse {
   email: string;
+  count: number;
+  items: WorkerListItem[];
+}
+
+interface WorkerMessage {
+  id: number;
   subject: string | null;
   from_email: string | null;
   body: string | null;
   created_at: string | null;
 }
 
-// ─── Hàm chính: page.tsx gọi hàm này ─────────────────────────────────────────
-
-export async function fetchInbox(address: string): Promise<{
-  success: boolean;
-  messages?: InboxMessage[];
+interface WorkerError {
   error?: string;
-}> {
-  try {
-    const res = await fetch(
-      `${WORKER_URL}/api/inbox?email=${encodeURIComponent(address)}`,
-      { cache: "no-store" }
-    );
+}
 
-    if (!res.ok) {
-      return { success: false, error: `Không tải được hộp thư (${res.status})` };
+// ─── Error mapping ────────────────────────────────────────────────────────────
+
+export const TOKEN_EXPIRED_MESSAGE = "Địa chỉ này đã hết hạn (24 giờ). Hãy tạo địa chỉ mới.";
+
+function mapError(status: number, payload: WorkerError | null): { code: InboxErrorCode; error: string } {
+  if (status === 401 && payload?.error === "token_expired") {
+    return { code: "token_expired", error: TOKEN_EXPIRED_MESSAGE };
+  }
+  if (status === 401 || status === 403) {
+    return { code: "unauthorized", error: "Không có quyền truy cập hộp thư này. Hãy tạo địa chỉ mới." };
+  }
+  if (status === 429) {
+    return { code: "rate_limited", error: "Bạn thao tác quá nhanh. Đợi khoảng 30 giây rồi thử lại." };
+  }
+  if (status === 404) {
+    return { code: "not_found", error: "Không tìm thấy thư này (có thể đã bị xoá sau 24 giờ)." };
+  }
+  const detail = payload?.error ? ` (${payload.error})` : "";
+  return { code: "server", error: `Không tải được hộp thư (${status})${detail}` };
+}
+
+async function workerGet<T>(path: string, address: string, accessToken: string, extra: Record<string, string> = {}) {
+  const params = new URLSearchParams({ email: address, ...extra });
+  const res = await fetch(`${WORKER_URL}${path}?${params.toString()}`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  let payload: unknown = null;
+  try {
+    payload = await res.json();
+  } catch {
+    payload = null;
+  }
+  return { res, payload: payload as T | WorkerError | null };
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+export async function fetchInbox(address: string, accessToken: string): Promise<FetchInboxResponse> {
+  try {
+    const { res, payload } = await workerGet<WorkerListResponse>("/api/v2/inbox", address, accessToken);
+
+    if (!res.ok) return { success: false, ...mapError(res.status, payload as WorkerError | null) };
+
+    const list = payload as WorkerListResponse | null;
+    if (!list || !Array.isArray(list.items)) {
+      return { success: false, code: "server", error: "Máy chủ trả dữ liệu không hợp lệ." };
     }
 
-    const rows = (await res.json()) as WorkerRow[];
-
-    const messages = rows.map((row) => {
-      const body = row.body ?? "";
-      return {
-        id: String(row.id),
-        from: decodeMimeHeader(row.from_email ?? "Unknown"),
-        subject: decodeMimeHeader(row.subject ?? ""),
-        body,
-        isHtml: /<[a-z][\s\S]*>/i.test(body),
-        receivedAt: row.created_at ? new Date(row.created_at) : new Date(),
-      } as unknown as InboxMessage;
-    });
+    const messages: InboxMessage[] = list.items.map((row) => ({
+      id: String(row.id),
+      from: decodeMimeHeader(row.from_email ?? "Unknown"),
+      subject: decodeMimeHeader(row.subject ?? ""),
+      preview: row.preview ?? "",
+      receivedAt: row.created_at ? new Date(row.created_at) : new Date(),
+    }));
 
     return { success: true, messages };
   } catch {
-    return { success: false, error: "Không kết nối được máy chủ. Thử lại sau nhé." };
+    return { success: false, code: "network", error: "Không kết nối được máy chủ. Thử lại sau nhé." };
+  }
+}
+
+export async function fetchMessage(address: string, accessToken: string, id: string): Promise<FetchMessageResponse> {
+  try {
+    const { res, payload } = await workerGet<WorkerMessage>("/api/v2/message", address, accessToken, { id });
+
+    if (!res.ok) return { success: false, ...mapError(res.status, payload as WorkerError | null) };
+
+    const row = payload as WorkerMessage | null;
+    if (!row || typeof row.id !== "number") {
+      return { success: false, code: "server", error: "Máy chủ trả dữ liệu không hợp lệ." };
+    }
+
+    const body = row.body ?? "";
+    return {
+      success: true,
+      message: {
+        id: String(row.id),
+        from: decodeMimeHeader(row.from_email ?? "Unknown"),
+        subject: decodeMimeHeader(row.subject ?? ""),
+        preview: "",
+        body,
+        isHtml: /<[a-z][\s\S]*>/i.test(body),
+        receivedAt: row.created_at ? new Date(row.created_at) : new Date(),
+      },
+    };
+  } catch {
+    return { success: false, code: "network", error: "Không kết nối được máy chủ. Thử lại sau nhé." };
   }
 }
