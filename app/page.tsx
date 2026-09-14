@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertCircle,
   ArrowLeft,
   Check,
   ChevronRight,
   Copy,
   Inbox,
+  KeyRound,
   Loader2,
   Mail,
   RefreshCw,
@@ -18,6 +20,7 @@ import {
 import { EmailFrame } from "@/components/email-frame";
 import { fetchInbox, fetchMessage, TOKEN_EXPIRED_MESSAGE } from "@/lib/inbox-service";
 import { validateAlias } from "@/lib/email-generator";
+import { detectOtp, stripHtmlForDetection } from "@/lib/otp-detect";
 import type { CreateEmailResponse, InboxMessage, SavedAddress } from "@/types/email";
 
 const EMAIL_DOMAIN = process.env.NEXT_PUBLIC_EMAIL_DOMAIN ?? "beeaistore.site";
@@ -25,6 +28,11 @@ const LEGACY_STORAGE_KEY = "beemail-addresses"; // string[] — pre-token format
 const STORAGE_KEY = "beemail-inboxes-v2"; // SavedAddress[]
 const LEGACY_INBOX_MESSAGE =
   "Địa chỉ này được tạo trước bản cập nhật bảo mật nên không thể mở hộp thư nữa. Hãy tạo địa chỉ mới.";
+
+// How long a Home-screen OTP preview (fetched for every saved, non-expired
+// address) stays valid before Home is allowed to re-fetch it. Bouncing
+// Home <-> Inbox within this window reuses the cached preview — no request.
+const HOME_PREVIEW_TTL_MS = 30_000;
 
 function loadSavedAddresses(): SavedAddress[] {
   try {
@@ -253,6 +261,98 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+// ─── OTP quick-copy ─────────────────────────────────────────────────────────
+// Detection: subject + list preview for inbox rows, subject + full plaintext
+// body for the detail view (independent of the sandboxed iframe).
+
+function getListOtp(message: InboxMessage): string | null {
+  return detectOtp(message.subject, message.preview);
+}
+
+function getDetailOtp(message: InboxMessage): string | null {
+  const plainBody = message.isHtml ? stripHtmlForDetection(message.body ?? "") : message.body ?? "";
+  return detectOtp(message.subject, plainBody);
+}
+
+function OtpChip({ code, compact = false }: { code: string; compact?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const handleCopy = async (event: React.MouseEvent) => {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = code;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopied(true);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "Đã sao chép mã OTP" : `Sao chép mã OTP ${code}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: compact ? "7px" : "10px",
+        padding: compact ? "8px 12px" : "12px 16px",
+        minHeight: "44px",
+        borderRadius: compact ? "12px" : "14px",
+        border: `1px solid ${copied ? "rgba(22,163,74,0.35)" : "rgba(245,158,11,0.45)"}`,
+        background: copied ? "rgba(22,163,74,0.08)" : "linear-gradient(135deg, #fff3c4, #ffe8a3)",
+        color: copied ? colors.green : colors.navy,
+        cursor: "pointer",
+        boxShadow: copied ? "none" : "0 10px 24px rgba(245,158,11,0.18)",
+        flexShrink: 0,
+      }}
+    >
+      <KeyRound size={compact ? 14 : 16} color={copied ? colors.green : colors.amber} />
+      <span
+        style={{
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+          fontSize: compact ? "14px" : "18px",
+          fontWeight: 950,
+          letterSpacing: "0.08em",
+        }}
+      >
+        {copied ? "Đã sao chép" : code}
+      </span>
+      {copied ? (
+        <Check size={compact ? 13 : 15} color={colors.green} />
+      ) : (
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            fontSize: compact ? "11px" : "12px",
+            fontWeight: 900,
+            color: colors.amber,
+          }}
+        >
+          <Copy size={compact ? 12 : 13} />
+          {!compact && "Sao chép"}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function BrandLogo() {
   return (
     <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
@@ -361,6 +461,17 @@ function FeatureCard({ Icon, title, desc }: Feature) {
 export default function HomePage() {
   const [view, setView] = useState<View>("home");
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
+  // Mirrors `addresses` for the Home OTP-preview fetcher below. Updated
+  // imperatively at the two places `setAddresses` is called (never through
+  // its own effect) so `runHomePreviewFetch` always reads the latest list
+  // without needing `addresses` as a dependency — that dependency would make
+  // every address-list change (e.g. creating a new email) re-trigger it.
+  const addressesRef = useRef<SavedAddress[]>([]);
+  // Home-screen OTP previews: email -> detected code (or null = checked, none found).
+  // Absence of a key means "not fetched yet".
+  const [addressPreviews, setAddressPreviews] = useState<Record<string, string | null>>({});
+  const homePreviewFetchedAtRef = useRef(0);
+  const homePreviewInFlightRef = useRef(false);
   const [customAlias, setCustomAlias] = useState("");
   const [aliasError, setAliasError] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -372,6 +483,46 @@ export default function HomePage() {
   const [selectedMsg, setSelectedMsg] = useState<InboxMessage | null>(null);
   const [loadingMessage, setLoadingMessage] = useState(false);
   const [messageError, setMessageError] = useState("");
+
+  // Message ids already shown to the user for the currently open inbox — used
+  // only to diff the next fetch and spot arrivals. Never drives a network call.
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  const [newMailBanner, setNewMailBanner] = useState<{ count: number; otp: string | null } | null>(null);
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+    };
+  }, []);
+
+  // Diffs a freshly-fetched list against what's already been seen for this
+  // inbox. `isInitialLoad` seeds the seen-set silently (no "new mail" banner
+  // the first time an inbox is opened — everything in it is just... the inbox).
+  const applyInboxResult = useCallback((list: InboxMessage[], isInitialLoad: boolean) => {
+    if (isInitialLoad) {
+      seenIdsRef.current = new Set(list.map((m) => m.id));
+      setNewIds(new Set());
+      setMessages(list);
+      return;
+    }
+
+    const added = list.filter((m) => !seenIdsRef.current.has(m.id));
+    list.forEach((m) => seenIdsRef.current.add(m.id));
+    setMessages(list);
+
+    if (added.length > 0) {
+      setNewIds(new Set(added.map((m) => m.id)));
+      const otpHit = added.map((m) => getListOtp(m)).find((code): code is string => Boolean(code)) ?? null;
+      setNewMailBanner({ count: added.length, otp: otpHit });
+
+      if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+      bannerTimeoutRef.current = setTimeout(() => setNewMailBanner(null), 6000);
+    } else {
+      setNewIds(new Set());
+    }
+  }, []);
 
   const features = useMemo<Feature[]>(
     () => [
@@ -385,8 +536,63 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setAddresses(loadSavedAddresses());
+    const loaded = loadSavedAddresses();
+    addressesRef.current = loaded;
+    setAddresses(loaded);
   }, []);
+
+  // Home OTP-preview fetch: one GET /api/v2/inbox per saved, non-expired
+  // address, gated by HOME_PREVIEW_TTL_MS. Never runs on a timer — only ever
+  // called from the two effects below (Home entered/re-entered, tab
+  // refocused while on Home) and, transitively, from view transitions.
+  const runHomePreviewFetch = useCallback(() => {
+    if (homePreviewInFlightRef.current) return;
+    const now = Date.now();
+    if (now - homePreviewFetchedAtRef.current < HOME_PREVIEW_TTL_MS) return;
+
+    const targets = addressesRef.current.filter((saved) => saved.accessToken && !isExpired(saved));
+    if (targets.length === 0) return;
+
+    homePreviewFetchedAtRef.current = now;
+    homePreviewInFlightRef.current = true;
+
+    Promise.all(
+      targets.map(async (saved) => {
+        try {
+          const result = await fetchInbox(saved.email, saved.accessToken as string);
+          if (result.success) {
+            const latest = (result.messages ?? [])[0];
+            const otp = latest ? getListOtp(latest) : null;
+            setAddressPreviews((prev) => ({ ...prev, [saved.email]: otp }));
+          }
+          // On failure: leave whatever was cached for this address untouched.
+        } catch {
+          // Silent — same reasoning as above.
+        }
+      })
+    ).finally(() => {
+      homePreviewInFlightRef.current = false;
+    });
+  }, []);
+
+  // Trigger 1 & 2: entering Home for the first time, and returning to it
+  // (view transitions to "home"). The TTL check above makes the "returning"
+  // case a no-op when it happens within HOME_PREVIEW_TTL_MS.
+  useEffect(() => {
+    if (view === "home") runHomePreviewFetch();
+  }, [view, runHomePreviewFetch]);
+
+  // Trigger 3: tab regains visibility while sitting on Home. Same TTL gate.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && view === "home") {
+        runHomePreviewFetch();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [view, runHomePreviewFetch]);
 
   const persist = (list: SavedAddress[]) => {
     if (typeof window !== "undefined") {
@@ -422,6 +628,7 @@ export default function HomePage() {
           expiresAt: data.expiresAt ?? null,
         };
         const updated = [entry, ...addresses.filter((saved) => saved.email !== data.email)];
+        addressesRef.current = updated;
         setAddresses(updated);
         persist(updated);
 
@@ -443,6 +650,9 @@ export default function HomePage() {
     setActiveToken(saved.accessToken);
     setSelectedMsg(null);
     setMessages([]);
+    seenIdsRef.current = new Set();
+    setNewIds(new Set());
+    setNewMailBanner(null);
     setView("inbox");
     setInboxError("");
 
@@ -457,30 +667,71 @@ export default function HomePage() {
 
     setLoadingInbox(true);
     const result = await fetchInbox(saved.email, saved.accessToken);
-    if (result.success) setMessages(result.messages ?? []);
+    if (result.success) applyInboxResult(result.messages ?? [], true);
     else setInboxError(result.error ?? "Không tải được hộp thư");
     setLoadingInbox(false);
   };
 
-  const refreshInbox = async () => {
-    if (!activeEmail || loadingInbox) return;
+  // Synchronous in-flight guard: `loadingInbox` (React state) isn't enough on
+  // its own — several visibilitychange events can fire back-to-back in the
+  // same tick, all reading the same stale pre-update `loadingInbox` value.
+  // A ref is mutated immediately, so the 2nd..nth call in a burst bails out
+  // for real instead of each firing its own request.
+  const fetchInFlightRef = useRef(false);
+
+  // Triggered only by: the "Làm mới" button, the tab regaining visibility,
+  // or opening/switching into an inbox. Never on a timer.
+  const refreshInbox = useCallback(async () => {
+    if (!activeEmail || fetchInFlightRef.current) return;
     if (!activeToken) {
       setInboxError(LEGACY_INBOX_MESSAGE);
       return;
     }
 
+    fetchInFlightRef.current = true;
     setLoadingInbox(true);
     setInboxError("");
 
-    const result = await fetchInbox(activeEmail, activeToken);
-    if (result.success) setMessages(result.messages ?? []);
-    else setInboxError(result.error ?? "Lỗi tải hộp thư");
+    try {
+      const result = await fetchInbox(activeEmail, activeToken);
+      if (result.success) applyInboxResult(result.messages ?? [], false);
+      else setInboxError(result.error ?? "Lỗi tải hộp thư");
+    } finally {
+      fetchInFlightRef.current = false;
+      setLoadingInbox(false);
+    }
+  }, [activeEmail, activeToken, applyInboxResult]);
 
-    setLoadingInbox(false);
-  };
+  // Tab-focus refresh (trigger #3): fires only on an actual hidden->visible
+  // transition, never on an interval — the browser dispatches this event,
+  // BeeMail does not poll for it. A short cooldown additionally absorbs
+  // rapid repeat transitions (fast alt-tabbing, OS/devtools focus churn)
+  // so a flurry of visibility flips can't turn into a flurry of requests.
+  const lastVisibilityRefreshRef = useRef(0);
+  const VISIBILITY_REFRESH_COOLDOWN_MS = 4000;
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible" || view !== "inbox" || !activeToken) return;
+      const now = Date.now();
+      if (now - lastVisibilityRefreshRef.current < VISIBILITY_REFRESH_COOLDOWN_MS) return;
+      lastVisibilityRefreshRef.current = now;
+      refreshInbox();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [view, activeToken, refreshInbox]);
 
   const openMessage = async (message: InboxMessage) => {
     if (!activeEmail || !activeToken) return;
+
+    setNewIds((prev) => {
+      if (!prev.has(message.id)) return prev;
+      const next = new Set(prev);
+      next.delete(message.id);
+      return next;
+    });
 
     setSelectedMsg(message);
     setMessageError("");
@@ -507,12 +758,26 @@ export default function HomePage() {
   };
 
   if (view === "message" && selectedMsg) {
+    const detailOtp = !loadingMessage && !messageError ? getDetailOtp(selectedMsg) : null;
+
     return (
       <div style={pageStyle}>
         <div style={{ ...shellStyle, padding: "32px 0 72px" }}>
-          <button type="button" style={backButtonStyle} onClick={() => { setView("inbox"); setSelectedMsg(null); }}>
-            <ArrowLeft size={15} /> Quay lại Inbox
-          </button>
+          <div
+            style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 5,
+              background: "linear-gradient(180deg, #fffaf0 78%, rgba(255,250,240,0))",
+              paddingTop: "12px",
+              paddingBottom: "6px",
+              marginTop: "-12px",
+            }}
+          >
+            <button type="button" style={backButtonStyle} onClick={() => { setView("inbox"); setSelectedMsg(null); }}>
+              <ArrowLeft size={15} /> Quay lại Inbox
+            </button>
+          </div>
 
           <article style={cardStyle}>
             <header style={{ padding: "26px 28px", borderBottom: `1px solid ${colors.line}` }}>
@@ -524,6 +789,11 @@ export default function HomePage() {
                 <div><strong style={{ color: colors.navy }}>Đến:</strong> {activeEmail}</div>
                 <div><strong style={{ color: colors.navy }}>Lúc:</strong> {selectedMsg.receivedAt.toLocaleString("vi-VN")}</div>
               </div>
+              {detailOtp && (
+                <div style={{ marginTop: "18px" }}>
+                  <OtpChip code={detailOtp} />
+                </div>
+              )}
             </header>
 
             {loadingMessage ? (
@@ -611,7 +881,8 @@ export default function HomePage() {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "8px",
-                  padding: "10px 14px",
+                  padding: "12px 16px",
+                  minHeight: "44px",
                   borderRadius: "14px",
                   border: `1px solid ${colors.line}`,
                   background: "#ffffff",
@@ -619,6 +890,7 @@ export default function HomePage() {
                   fontSize: "13px",
                   fontWeight: 900,
                   cursor: loadingInbox ? "not-allowed" : "pointer",
+                  flexShrink: 0,
                 }}
               >
                 {loadingInbox ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
@@ -626,14 +898,70 @@ export default function HomePage() {
               </button>
             </header>
 
+            {newMailBanner && (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  padding: "14px 24px",
+                  background: "linear-gradient(135deg, #fff8dc, #fff2c2)",
+                  borderBottom: `1px solid ${colors.line}`,
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", color: colors.navy, fontSize: "13px", fontWeight: 900 }}>
+                  <Sparkles size={15} color={colors.amber} />
+                  {newMailBanner.count === 1 ? "1 thư mới vừa đến" : `${newMailBanner.count} thư mới vừa đến`}
+                </span>
+                {newMailBanner.otp && <OtpChip code={newMailBanner.otp} compact />}
+              </div>
+            )}
+
             {loadingInbox ? (
-              <div style={{ padding: "72px 24px", textAlign: "center", color: colors.muted }}>
-                <Loader2 size={28} className="spin" style={{ marginBottom: "12px" }} />
-                <p style={{ margin: 0, fontWeight: 800 }}>Đang tải hộp thư...</p>
+              <div>
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                      padding: "18px 24px",
+                      borderBottom: i < 2 ? `1px solid ${colors.line}` : "none",
+                    }}
+                  >
+                    <div className="skeleton" style={{ width: "38%", height: "13px", borderRadius: "6px" }} />
+                    <div className="skeleton" style={{ width: "62%", height: "13px", borderRadius: "6px" }} />
+                    <div className="skeleton" style={{ width: "80%", height: "11px", borderRadius: "6px" }} />
+                  </div>
+                ))}
               </div>
             ) : inboxError ? (
-              <div style={{ padding: "72px 24px", textAlign: "center", color: colors.danger, fontWeight: 800 }}>
-                {inboxError}
+              <div style={{ padding: "56px 24px", textAlign: "center" }}>
+                <AlertCircle size={30} color={colors.danger} style={{ marginBottom: "12px" }} />
+                <p style={{ margin: "0 0 18px", color: colors.danger, fontWeight: 800, fontSize: "14px" }}>{inboxError}</p>
+                <button
+                  type="button"
+                  onClick={refreshInbox}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "12px 18px",
+                    minHeight: "44px",
+                    borderRadius: "14px",
+                    border: "1px solid #f1c35b",
+                    background: "#fff8df",
+                    color: colors.amber,
+                    fontSize: "13px",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  <RefreshCw size={14} /> Thử lại
+                </button>
               </div>
             ) : messages.length === 0 ? (
               <div style={{ padding: "72px 24px", textAlign: "center" }}>
@@ -659,44 +987,83 @@ export default function HomePage() {
               </div>
             ) : (
               <div>
-                {messages.map((message, index) => (
-                  <button
-                    key={message.id}
-                    type="button"
-                    onClick={() => openMessage(message)}
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "16px",
-                      padding: "18px 24px",
-                      border: "none",
-                      borderBottom: index < messages.length - 1 ? `1px solid ${colors.line}` : "none",
-                      background: "transparent",
-                      textAlign: "left",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={(event) => { event.currentTarget.style.background = "rgba(255, 247, 221, 0.72)"; }}
-                    onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
-                  >
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <p style={{ margin: "0 0 5px", color: colors.navy, fontSize: "14px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {message.from}
-                      </p>
-                      <p style={{ margin: "0 0 5px", color: colors.text, fontSize: "14px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {message.subject || "(Không có tiêu đề)"}
-                      </p>
-                      <p style={{ margin: 0, color: colors.muted, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {message.preview.slice(0, 96)}
-                      </p>
+                {messages.map((message, index) => {
+                  const otp = getListOtp(message);
+                  const isNew = newIds.has(message.id);
+                  return (
+                    // A <div role="button">, not a <button>: it contains the OTP chip's own
+                    // copy <button>, and interactive elements can't legally nest in HTML.
+                    <div
+                      key={message.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openMessage(message)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openMessage(message);
+                        }
+                      }}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        padding: "16px 24px 16px 20px",
+                        border: "none",
+                        borderLeft: isNew ? `3px solid ${colors.amber}` : "3px solid transparent",
+                        borderBottom: index < messages.length - 1 ? `1px solid ${colors.line}` : "none",
+                        background: isNew ? "rgba(255, 240, 189, 0.35)" : "transparent",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        minHeight: "44px",
+                        boxSizing: "border-box",
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = "rgba(255, 247, 221, 0.72)"; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = isNew ? "rgba(255, 240, 189, 0.35)" : "transparent"; }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "5px" }}>
+                          <p style={{ margin: 0, color: colors.navy, fontSize: "14px", fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                            {message.from}
+                          </p>
+                          {isNew && (
+                            <span
+                              style={{
+                                flexShrink: 0,
+                                padding: "2px 8px",
+                                borderRadius: "999px",
+                                background: colors.amber,
+                                color: "#fff",
+                                fontSize: "10px",
+                                fontWeight: 950,
+                                letterSpacing: "0.04em",
+                              }}
+                            >
+                              MỚI
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ margin: "0 0 6px", color: colors.text, fontSize: "14px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {message.subject || "(Không có tiêu đề)"}
+                        </p>
+                        {otp && (
+                          <div style={{ marginBottom: "6px" }}>
+                            <OtpChip code={otp} compact />
+                          </div>
+                        )}
+                        <p style={{ margin: 0, color: colors.muted, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {message.preview.slice(0, 96)}
+                        </p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", color: colors.soft, fontSize: "12px", flexShrink: 0 }}>
+                        {message.receivedAt.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
+                        <ChevronRight size={16} />
+                      </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", color: colors.soft, fontSize: "12px", flexShrink: 0 }}>
-                      {message.receivedAt.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
-                      <ChevronRight size={16} />
-                    </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -879,51 +1246,66 @@ export default function HomePage() {
                 </span>
               </div>
 
-              {addresses.map((saved, index) => (
-                <div
-                  key={saved.email}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "14px",
-                    padding: "17px 26px",
-                    borderBottom: index < addresses.length - 1 ? `1px solid ${colors.line}` : "none",
-                  }}
-                >
-                  <span style={{ minWidth: 0, flex: 1, color: saved.accessToken && !isExpired(saved) ? colors.navy : colors.soft, fontSize: "14px", fontFamily: "monospace", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {saved.email}
-                    {(!saved.accessToken || isExpired(saved)) && (
-                      <span style={{ marginLeft: "8px", fontSize: "11px", fontFamily: "inherit", fontWeight: 700, color: colors.soft }}>
-                        {saved.accessToken ? "(hết hạn)" : "(địa chỉ cũ)"}
-                      </span>
-                    )}
-                  </span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "9px", flexShrink: 0 }}>
-                    <button
-                      type="button"
-                      onClick={() => openInbox(saved)}
-                      title={!saved.accessToken ? LEGACY_INBOX_MESSAGE : isExpired(saved) ? TOKEN_EXPIRED_MESSAGE : undefined}
+              {addresses.map((saved, index) => {
+                const previewOtp = addressPreviews[saved.email];
+                return (
+                  <div
+                    key={saved.email}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "10px",
+                      padding: "17px 26px",
+                      borderBottom: index < addresses.length - 1 ? `1px solid ${colors.line}` : "none",
+                    }}
+                  >
+                    <div
                       style={{
-                        display: "inline-flex",
+                        display: "flex",
                         alignItems: "center",
-                        gap: "7px",
-                        padding: "9px 13px",
-                        borderRadius: "12px",
-                        border: saved.accessToken && !isExpired(saved) ? "1px solid #f1c35b" : "1px solid #e4e7ec",
-                        background: saved.accessToken && !isExpired(saved) ? "#fff8df" : "#f6f7f9",
-                        color: saved.accessToken && !isExpired(saved) ? colors.amber : colors.soft,
-                        cursor: "pointer",
-                        fontSize: "12px",
-                        fontWeight: 950,
+                        justifyContent: "space-between",
+                        gap: "14px",
+                        flexWrap: "wrap",
                       }}
                     >
-                      <Inbox size={13} /> Inbox
-                    </button>
-                    <CopyButton text={saved.email} />
+                      <span style={{ minWidth: 0, flex: 1, color: saved.accessToken && !isExpired(saved) ? colors.navy : colors.soft, fontSize: "14px", fontFamily: "monospace", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {saved.email}
+                        {(!saved.accessToken || isExpired(saved)) && (
+                          <span style={{ marginLeft: "8px", fontSize: "11px", fontFamily: "inherit", fontWeight: 700, color: colors.soft }}>
+                            {saved.accessToken ? "(hết hạn)" : "(địa chỉ cũ)"}
+                          </span>
+                        )}
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "9px", flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => openInbox(saved)}
+                          title={!saved.accessToken ? LEGACY_INBOX_MESSAGE : isExpired(saved) ? TOKEN_EXPIRED_MESSAGE : undefined}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "7px",
+                            padding: "9px 13px",
+                            borderRadius: "12px",
+                            border: saved.accessToken && !isExpired(saved) ? "1px solid #f1c35b" : "1px solid #e4e7ec",
+                            background: saved.accessToken && !isExpired(saved) ? "#fff8df" : "#f6f7f9",
+                            color: saved.accessToken && !isExpired(saved) ? colors.amber : colors.soft,
+                            cursor: "pointer",
+                            fontSize: "12px",
+                            fontWeight: 950,
+                          }}
+                        >
+                          <Inbox size={13} /> Inbox
+                        </button>
+                        <CopyButton text={saved.email} />
+                      </div>
+                    </div>
+                    {/* Home OTP preview — copy without ever opening Inbox. Only shown once a
+                        fetch found a code; no OTP means no extra UI (row stays as-is). */}
+                    {previewOtp && <OtpChip code={previewOtp} compact />}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </section>
           )}
         </main>
@@ -1005,6 +1387,18 @@ function GlobalAnimationStyles() {
       input::placeholder { color: #a5adba; }
       .spin { animation: spin 1s linear infinite; }
       @keyframes spin { to { transform: rotate(360deg); } }
+      .skeleton {
+        background: linear-gradient(90deg, #f4ede0 25%, #fbf3de 37%, #f4ede0 63%);
+        background-size: 400% 100%;
+        animation: shimmer 1.6s ease-in-out infinite;
+      }
+      @keyframes shimmer {
+        0% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .skeleton { animation: none; }
+      }
       @keyframes pulseSoft { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.88); } }
       @keyframes floatSoft { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
       @keyframes beeFlight {
