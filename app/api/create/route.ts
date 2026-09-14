@@ -13,7 +13,7 @@ function issueInboxToken(secret: string, email: string): { accessToken: string; 
   return { accessToken: `v2.${exp}.${sig}`, expiresAt: exp * 1000 };
 }
 
-// ─── Abuse guard for the Cloudflare Email Routing API call ───────────────────
+// ─── Abuse guard before minting an ownership token ────────────────────────────
 // Layer 1 (this file): per-instance sliding window — free, instant, catches single-instance bursts.
 // Layer 2 (Worker /api/v2/create-permit): shared counters via Workers Rate Limiting bindings
 // (per-IP + global), signed with INBOX_TOKEN_SECRET. No D1, no KV, one ~50 ms sub-request.
@@ -119,16 +119,10 @@ export async function POST(req: Request) {
     }
 
     const domain = process.env.EMAIL_DOMAIN;
-    const zoneId = process.env.CLOUDFLARE_ZONE_ID;
-    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-    const workerName = process.env.WORKER_NAME;
     const tokenSecret = process.env.INBOX_TOKEN_SECRET;
 
     const missingEnv = [
       !domain && "EMAIL_DOMAIN",
-      !zoneId && "CLOUDFLARE_ZONE_ID",
-      !apiToken && "CLOUDFLARE_API_TOKEN",
-      !workerName && "WORKER_NAME",
       !tokenSecret && "INBOX_TOKEN_SECRET",
     ].filter(Boolean);
 
@@ -142,8 +136,9 @@ export async function POST(req: Request) {
         );
       }
 
-      // Dev/test only: return a mock email without creating a real Cloudflare rule.
-      // A token is still issued when the secret exists so local dev can talk to a local Worker.
+      // Dev/test only: return a mock email (real requests never hit this branch in production
+      // since domain/secret are always configured there). A token is still issued when the
+      // secret exists so local dev can talk to a local Worker.
       const email = `${alias}@${domain ?? "beeaistore.site"}`;
       return NextResponse.json<CreateEmailResponse>({
         success: true,
@@ -155,8 +150,8 @@ export async function POST(req: Request) {
 
     const email = `${alias}@${domain}`;
 
-    // Shared, cross-instance limit before a Cloudflare Email Routing rule is spent.
-    // Fail closed: if the Worker cannot vouch, no rule is created (the inbox would be unusable anyway).
+    // Shared, cross-instance limit before minting a token for a new inbox.
+    // Fail closed: if the Worker cannot vouch, no token is issued.
     const permit = await requestCreatePermit(tokenSecret as string, clientIp(req));
     if (permit === "denied") {
       return NextResponse.json<CreateEmailResponse>(
@@ -171,37 +166,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const cfRes = await fetch(
-      `https://api.cloudflare.com/client/v4/zones/${zoneId}/email/routing/rules`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: alias,
-          enabled: true,
-          priority: 0,
-          matchers: [{ type: "literal", field: "to", value: email }],
-          actions: [{ type: "worker", value: [workerName] }],
-        }),
-      }
-    );
-
-    const cfData = await cfRes.json() as { success: boolean; errors?: { message: string }[] };
-
-    if (!cfData.success) {
-      const msg = cfData.errors?.[0]?.message ?? "Tạo email thất bại";
-      const isDuplicate =
-        msg.toLowerCase().includes("already exist") ||
-        msg.toLowerCase().includes("duplicate");
-      return NextResponse.json({
-        success: false,
-        error: isDuplicate ? "Tên này đã được dùng, hãy thử tên khác" : msg,
-      });
-    }
-
+    // No Cloudflare Email Routing Rule is created here. A zone-wide catch-all rule
+    // (verified 2026-09-14: enabled, matcher "all" → action worker=tempmail-inbox-worker)
+    // already delivers mail for every *@EMAIL_DOMAIN address into the Worker/D1.
+    // A dedicated rule per alias was redundant against that catch-all and would have
+    // exhausted the zone's 200-rule limit; "creating" an address here is just minting a token.
     return NextResponse.json<CreateEmailResponse>({
       success: true,
       email,
